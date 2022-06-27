@@ -3,6 +3,41 @@
 package absass
 
 import chisel3._
+import chisel3.util._
+
+class LogicUnit(val ws : Int) extends Module {
+  val io = IO(new Bundle {
+    val p = Input(UInt(ws.W))
+    val q = Input(UInt(ws.W))
+    val op = Input(UInt(4.W))
+    val out = Output(UInt(ws.W))
+  })
+
+  val (l_f :: l_nor :: l_nci :: l_np :: l_nmi :: l_nq :: 
+       l_xor :: l_nand :: l_and :: l_xnor :: l_p :: l_mi ::
+       l_q :: l_ci :: l_or :: l_t :: Nil) = Enum(16)
+    
+    io.out := 0.U
+    
+    switch (io.op) {
+      is(l_f) { io.out := 0.U }
+      is(l_nor) { io.out := ~(io.p | io.q) }
+      is(l_nci) { io.out := io.q & ~io.p }
+      is(l_np) { io.out := ~io.p }
+      is(l_nmi) { io.out := io.p & ~io.q }
+      is(l_nq) { io.out := ~io.q }
+      is(l_xor) { io.out := io.p ^ io.q }
+      is(l_nand) { io.out := ~(io.p & io.q) }
+      is(l_and) { io.out := io.p & io.q }
+      is(l_xnor) { io.out := ~(io.p ^ io.q) }
+      is(l_p) { io.out := io.p }
+      is(l_mi) { io.out := (io.p & io.q) | ~io.p }
+      is(l_q) { io.out := io.q }
+      is(l_ci) { io.out := io.p | ~io.q }
+      is(l_or) { io.out := io.p | io.q }
+      is(l_t) { io.out := ~0.U }
+    }
+}
 
 /**
   * Compute GCD using subtraction method.
@@ -17,6 +52,7 @@ class GCD extends Module {
     val outputGCD     = Output(UInt(16.W))
     val outputValid   = Output(Bool())
   })
+
 
   val x  = Reg(UInt())
   val y  = Reg(UInt())
