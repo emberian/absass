@@ -17,8 +17,8 @@ class LogicUnit(val ws : Int) extends Module {
        l_xor :: l_nand :: l_and :: l_xnor :: l_p :: l_mi ::
        l_q :: l_ci :: l_or :: l_t :: Nil) = Enum(16)
     
-    io.out := 0.U
-    
+    io.out := 0.U // otherwise the impossible untaken switch default makes us think the wire is uninitialized
+
     switch (io.op) {
       is(l_f) { io.out := 0.U }
       is(l_nor) { io.out := ~(io.p | io.q) }
@@ -37,6 +37,29 @@ class LogicUnit(val ws : Int) extends Module {
       is(l_or) { io.out := io.p | io.q }
       is(l_t) { io.out := ~0.U }
     }
+}
+
+class ArithUnit(val ws: Int) extends Module {
+  val io = IO(new Bundle {
+    val d = Input(UInt(ws.W))
+    val s = Input(UInt(ws.W))
+    val op = Input(UInt(3.W))
+    val out = Output(UInt(ws.W))
+  })
+
+  val (l_add :: l_sub :: l_shl :: l_shr :: l_asr :: l_mul :: l_div :: l_mod :: Nil) = Enum(8)
+
+  io.out := 0.U
+  switch (io.op) {
+    is(l_add) { io.out := io.d + io.s }
+    is(l_sub) { io.out := io.d - io.s }
+    is(l_shl) { io.out := io.d << io.s }
+    is(l_shr) { io.out := io.d >> io.s }
+    is(l_asr) { io.out := (io.d.asSInt >> io.s).asUInt }
+    is(l_mul) { io.out := io.d * io.s }
+    is(l_div) { io.out := io.d / io.s }
+    is(l_mod) { io.out := io.d % io.s }
+  }
 }
 
 /**
