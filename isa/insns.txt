@@ -1,0 +1,35 @@
+Values are shown in their natural big-endian representation.
+
+Instruction 0xABCD, or 0baaaabbbbccccdddd:
+
+           aaaa bbbb  cccc dddd
+Bit        1111 1198  7654 3210
+           5432 10
+
+C syntax is used in explications; familiarity with it is assumed.
+
+Ranges of [a:b] are inclusive of both endpoints (forgive me).
+
+- I[15:12] == 0b0001   ( BITWISE INSTRUCTIONS )
+	- I[3:0]: (D) Destination Register, LHS (0-15) 
+	- I[7:4]: (S) Source Register, RHS (0-15)
+	- I[11:8]: (M) Truth Table Number (0-15)
+		- cf. https://en.wikipedia.org/wiki/Truth_table#Binary_operations
+			0: F    1: NOR  2: NCI  3: ND
+			4: NMI	5: NS	6: XOR	7: NAND
+			8: AND	9: XNOR	10: S	11: MI
+			12: D	13: CI	14: OR	15: T
+
+- I[15:12] == 0b0010	( ARITHMETIC INSTRUCTIONS )
+	- I[3:0]: (D) Destination Register, LHS (0-15)
+	- I[7:4]: (S) Source Register, RHS (0-15)
+	- I[10:8]: (M) Operation Number (0-7)
+		- 0: Add (D = D + S)
+		- 1: Sub (D = D - S)
+		- 2: Shl (D = D << S, fill 0)
+		- 3: Shr (D = D >> S, fill 0)
+		- 4: Asr (D = D >> S, fill sign)
+		- 5: Mul (D = D * S)
+		- 6: Div (D = D / S)
+		- 7: Mod (D = D % S)
+		
