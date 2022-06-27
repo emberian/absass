@@ -1,6 +1,6 @@
 // See README.md for license details.
 
-package gcd
+package absass
 
 import chisel3._
 
@@ -31,4 +31,10 @@ class GCD extends Module {
 
   io.outputGCD := x
   io.outputValid := y === 0.U
+}
+
+import chisel3.stage.ChiselStage
+
+object GCDDriver extends App {
+  (new ChiselStage).emitVerilog(new GCD, args)
 }
