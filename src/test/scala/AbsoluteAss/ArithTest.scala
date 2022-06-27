@@ -15,22 +15,22 @@ class ArithTest extends AnyFreeSpec with ChiselScalatestTester {
     for (_ <- 1 until 10000) {
       val a = r.nextInt(65535)
       val b = r.nextInt(65535)
-      var exp = c(a, b) & 65535
+      var exp = c(a, b) % 65536
+      if (exp < 0) { 
+        exp = 65536 + exp;
+      }
 
       aunit.io.op.poke(op);
-      aunit.io.s.poke(a);
-      aunit.io.d.poke(b);
-      if (aunit.io.out.peekInt() != exp) {
-        /*
-        println("bad bad bad!")
-        println(aunit.io.out.peekInt())
-        println(exp)
-        println(op)
-        println(a)
-        println(b)
+      aunit.io.d.poke(a);
+      aunit.io.s.poke(b);
+      val real = aunit.io.out.peekInt()
+      val sop =
+        List("+", "-", "<<", ">>", ">>>", "*", "/", "%")(op.litValue().toInt)
+      if (real != BigInt(exp)) {
+        println(s"bad bad bad! $a $sop $b == $real (wanted $exp)")
         assert(false)
-         */
       }
+
       aunit.io.out.expect(exp);
     }
   }
@@ -49,17 +49,34 @@ class ArithTest extends AnyFreeSpec with ChiselScalatestTester {
 
   "Shift left" in {
     test(new ArithUnit(16)) { l =>
-      test_unit(l, l.l_shl, (a: Int, b: Int) => a << b)
+      test_unit(
+        l,
+        l.l_shl,
+        (a: Int, b: Int) =>
+          if (b > 15) { 0 }
+          else { a << b }
+      )
     }
   }
   "Shift right" in {
     test(new ArithUnit(16)) { l =>
-      test_unit(l, l.l_shr, (a: Int, b: Int) => a >> b)
+      test_unit(
+        l,
+        l.l_shr,
+        (a: Int, b: Int) =>
+          if (b > 15) { 0 }
+          else { a >> b }
+      )
     }
   }
   "Arithmetic shift right" in {
     test(new ArithUnit(16)) { l =>
-      test_unit(l, l.l_asr, (a: Int, b: Int) => a >>> b)
+      test_unit(
+        l,
+        l.l_asr,
+        (a: Int, b: Int) =>
+          a >>> b
+      )
     }
   }
   "Multiplication" in {
