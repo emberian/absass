@@ -33,3 +33,20 @@ Ranges of [a:b] are inclusive of both endpoints (forgive me).
 		- 6: Div (D = D / S)
 		- 7: Mod (D = D % S)
 		
+
+- I[15:14] == 0b01    ( DATA TRANSFER INSTRUCTIONS )
+    - I[3:0]: (D) Destination Register, LHS (0-15)
+    - I[7:4]: (S) Source Register, RHS (0-15)
+    - I[10]: (Dm) Destination indirect
+    - I[9:8]: (Da) Destination increment mode 
+    - I[13]: (Sm) Source indirect
+    - I[12:11]: (Sa) Source increment mode
+
+The _indirect bit_, if set, uses the register contents as a memory address and generates the appropriate load/store behavior.
+
+The _increment mode_ is a two bit value interpreted as:
+
+    - 0b00 - no change is made to the registers
+    - 0b01 - autoincrement: increment the value of the register by $WORDBYTES after the memory operation
+    - 0b10 - autodecrement: decrement the value of the register by $WORDBYTES before the operation
+    - 0b11 - the register is ignored, and instead all ones are used for the value.
