@@ -16,7 +16,7 @@ class ArithTest extends AnyFreeSpec with ChiselScalatestTester {
       val a = r.nextInt(65535)
       val b = r.nextInt(65535)
       var exp = c(a, b) % 65536
-      if (exp < 0) { 
+      if (exp < 0) {
         exp = 65536 + exp;
       }
 
@@ -75,7 +75,10 @@ class ArithTest extends AnyFreeSpec with ChiselScalatestTester {
         l,
         l.l_asr,
         (a: Int, b: Int) =>
-          a >>> b
+          if (b > 15) {
+            if (a > 32767) { 0xffff }
+            else { 0 }
+          } else { a >>> b }
       )
     }
   }
