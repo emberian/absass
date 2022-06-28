@@ -74,6 +74,31 @@ class ArithUnit(val ws: Int) extends Module {
   }
 }
 
+class ComparisonUnit(val ws: Int) extends Module {
+  val io = IO(new Bundle {
+    val d = Input(UInt(ws.W))
+    val s = Input(UInt(ws.W))
+    val eq = Input(Bool())
+    val gt = Input(Bool())
+    val sn = Input(Bool())
+    val iv = Input(Bool())
+    val cnd = Reg(Bool())
+    val out = Output(UInt(ws.W))
+  })
+
+  io.cnd := 0.U
+  when(io.eq && io.d === io.s) { io.cnd := 1.U }
+  when(io.gt) {
+    when(io.sn) {
+      when(io.d.asSInt > io.s.asSInt) { io.cnd := 1.U }
+    }.otherwise {
+      when(io.d > io.s) { io.cnd := 1.U }
+    }
+  }
+  when(io.iv) { io.cnd := !io.cnd }
+  when(io.cnd) { io.out := 1.U }.otherwise { io.out := 0.U }
+}
+
 /** Compute GCD using subtraction method. Subtracts the smaller from the larger
   * until register y is zero. value in register x is then the GCD
   */
