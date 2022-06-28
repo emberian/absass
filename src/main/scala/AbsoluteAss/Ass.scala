@@ -82,21 +82,20 @@ class ComparisonUnit(val ws: Int) extends Module {
     val gt = Input(Bool())
     val sn = Input(Bool())
     val iv = Input(Bool())
-    val cnd = Reg(Bool())
     val out = Output(UInt(ws.W))
   })
 
-  io.cnd := 0.U
-  when(io.eq && io.d === io.s) { io.cnd := 1.U }
+  val cnd = 0.U
+  when(io.eq && io.d === io.s) { cnd := 1.U }
   when(io.gt) {
     when(io.sn) {
-      when(io.d.asSInt > io.s.asSInt) { io.cnd := 1.U }
+      when(io.d.asSInt > io.s.asSInt) { cnd := 1.U }
     }.otherwise {
-      when(io.d > io.s) { io.cnd := 1.U }
+      when(io.d > io.s) { cnd := 1.U }
     }
   }
-  when(io.iv) { io.cnd := !io.cnd }
-  when(io.cnd) { io.out := 1.U }.otherwise { io.out := 0.U }
+  when(io.iv) { cnd := !cnd }
+  when(cnd === 0.U) { io.out := 1.U }.otherwise { io.out := 0.U }
 }
 
 class CPU(val ws: Int) extends Module {
@@ -176,39 +175,11 @@ class CPU(val ws: Int) extends Module {
         }
       }
     }
-
   }
-}
-
-/** Compute GCD using subtraction method. Subtracts the smaller from the larger
-  * until register y is zero. value in register x is then the GCD
-  */
-class GCD extends Module {
-  val io = IO(new Bundle {
-    val value1 = Input(UInt(16.W))
-    val value2 = Input(UInt(16.W))
-    val loadingValues = Input(Bool())
-    val outputGCD = Output(UInt(16.W))
-    val outputValid = Output(Bool())
-  })
-
-  val x = Reg(UInt())
-  val y = Reg(UInt())
-
-  when(x > y) { x := x - y }
-    .otherwise { y := y - x }
-
-  when(io.loadingValues) {
-    x := io.value1
-    y := io.value2
-  }
-
-  io.outputGCD := x
-  io.outputValid := y === 0.U
 }
 
 import chisel3.stage.ChiselStage
 
-object GCDDriver extends App {
-  (new ChiselStage).emitVerilog(new GCD, args)
+object AssDriver extends App {
+  (new ChiselStage).emitVerilog(new CPU(16), args)
 }
