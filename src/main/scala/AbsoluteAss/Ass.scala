@@ -99,6 +99,87 @@ class ComparisonUnit(val ws: Int) extends Module {
   when(io.cnd) { io.out := 1.U }.otherwise { io.out := 0.U }
 }
 
+class CPU(val ws: Int) extends Module {
+  val Word = UInt(ws.W)
+  val io = IO(new Bundle {
+    val mem_addr = Decoupled(Word)
+    val mem_content = Flipped(Decoupled(Word))
+    val is_write = Output(Bool())
+    val halt = Input(Bool())
+  })
+
+  val arith = new ArithUnit(ws)
+  val logic = new LogicUnit(ws)
+  val compare = new ComparisonUnit(ws)
+
+  val regs = Mem(16, Word)
+
+  val pc_reg = 0.U
+  val pc = 0.U
+  val inst = 0.U
+
+  val dl = 0.U
+  val sp = 0.U
+
+  when (!io.halt) {
+    pc := regs(pc_reg)
+    io.mem_addr.bits := pc
+    io.is_write := false.B
+    io.mem_addr.valid := true.B
+
+    io.mem_content.ready := true.B
+    when (io.mem_content.valid) {
+      inst := io.mem_content.bits
+      io.mem_addr.valid := false.B
+
+      pc := pc + 2.U
+      dl := inst(3, 0)
+      sp := inst(7, 4)
+
+      when (inst(15, 14) === "b01".U) {
+        // data transfer
+      }.otherwise {
+        switch (inst(15, 12)) {
+          is("b0001".U) {
+            logic.io.p := regs(dl)
+            logic.io.q := regs(sp)
+            logic.io.op := inst(11, 8)
+            regs(dl) := logic.io.out
+          }
+          is("b0010".U) {
+            arith.io.d := regs(dl)
+            arith.io.s := regs(sp)
+            arith.io.op := inst(10, 8)
+            regs(dl) := arith.io.out
+          }
+          is("b0011".U) {
+            compare.io.d := regs(dl)
+            compare.io.s := regs(sp)
+            compare.io.eq := inst(8)
+            compare.io.gt := inst(9)
+            compare.io.sn := inst(10)
+            compare.io.iv := inst(11)
+            regs(dl) := compare.io.out
+          }
+          is("b1000".U) {
+            // conditional
+            val offset = inst(7, 0)
+            val cmp = inst(11, 8)
+            when(regs(cmp) =/= 0.U) {
+              pc := pc + offset
+            }
+          }
+          is("b1001".U) {
+            regs(dl) := pc
+            regs(pc_reg) := regs(sp)
+          }
+        }
+      }
+    }
+
+  }
+}
+
 /** Compute GCD using subtraction method. Subtracts the smaller from the larger
   * until register y is zero. value in register x is then the GCD
   */
