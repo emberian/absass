@@ -35,7 +35,7 @@ class LogicUnit(val ws: Int) extends Module {
     is(l_q) { io.out := io.q }
     is(l_ci) { io.out := io.p | ~io.q }
     is(l_or) { io.out := io.p | io.q }
-    is(l_t) { io.out := ~0.U }
+    is(l_t) { io.out := Fill(ws, 1.U) }
   }
 }
 
@@ -50,18 +50,27 @@ class ArithUnit(val ws: Int) extends Module {
   val (l_add :: l_sub :: l_shl :: l_shr :: l_asr :: l_mul :: l_div :: l_mod :: Nil) =
     Enum(8)
 
+  val signed_max = (1.U << (ws - 1) - 1)
+
   io.out := 0.U
   switch(io.op) {
     is(l_add) { io.out := io.d + io.s }
     is(l_sub) { io.out := io.d - io.s }
     is(l_shl) { io.out := io.d << io.s }
     is(l_shr) { io.out := io.d >> io.s }
-    is(l_asr) { io.out := (io.d.asSInt >> io.s).asUInt }
+    is(l_asr) {
+      when(io.s < ws.U) { io.out := (io.d.asSInt >> io.s).asUInt }
+        .otherwise { io.out := Fill(ws, io.d(ws-1)) }
+    }
     is(l_mul) { io.out := io.d * io.s }
     is(l_div) {
-      when(io.s =/= 0.U) { io.out := io.d / io.s }.otherwise { io.out := ~0.U }
+      when(io.s =/= 0.U) { io.out := io.d / io.s }.otherwise {
+        io.out := Fill(ws, 1.U)
+      }
     }
-    is(l_mod) { io.out := io.d % io.s }
+    is(l_mod) {
+      when(io.s =/= 0.U) { io.out := io.d % io.s }.otherwise { io.out := 0.U }
+    }
   }
 }
 
