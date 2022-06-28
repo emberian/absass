@@ -50,3 +50,27 @@ The _increment mode_ is a two bit value interpreted as:
     - 0b01 - autoincrement: increment the value of the register by $WORDBYTES after the memory operation
     - 0b10 - autodecrement: decrement the value of the register by $WORDBYTES before the operation
     - 0b11 - the register is ignored, and instead all ones are used for the value.
+
+
+- I[15:12] == 0b0011	( COMPARISON INSTRUCTIONS )
+	- I[3:0]: (D) Destination Register, LHS (0-15)
+	- I[7:4]: (S) Source Register, RHS (0-15)
+	- I[8]: EQ Flag: True when D = S
+	- I[9]: GT Flag: True when D > S
+	- I[10]: SN Flag: GT respects sign
+	- I[11]: IV FLag: Test is inverted
+		- I[11:8] table: (AB = "above", BL = "below", both unsigned)
+			0: F	1: EQ	2: AB	3: ABE
+			4: F	5: EQ	6: GT	7: GTE
+			8: T	9: NEQ	10: BLE	11: BL
+			12: T	13: NEQ	14: LT	15: LTE
+
+- I[15:12] == 0b1000	( CONDITIONAL INSTRUCTIONS )
+	- I[7:0]: (S) *Signed* Offset (in *Instructions*)
+	- I[11:8]: (C) Comparison Register (0-15)
+		- Condition is passed if reg is nonzero
+
+- I[15:12] == 0b1001	( JUMP AND LINK )
+	- I[3:0]: (L) Link Register (written, next PC) (0-15)
+	- I[7:4]: (P) Program Register (read, new PC) (0-15)
+	- I[11:8]: Reserved
