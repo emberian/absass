@@ -176,7 +176,7 @@ class CPU(val ws: Int) extends Module {
     dl := inst(3, 0)
     sp := inst(7, 4)
 
-    printf(p"executing $inst, pc = $pc, regs(2) = ${regs(2)}\n")
+    printf(p"executing $inst, pc = ${regs(0)}\n")
 
     when(inst(15, 14) === "b01".U) {
       // data transfer
@@ -224,6 +224,7 @@ class CPU(val ws: Int) extends Module {
   }
 
   when(state === s_writeback) {
+    printf(p"writing $result to reg$dl, next pc = $pc\n")
     regs(pc_reg) := pc
     regs(dl) := result
     when(io.halt) {
