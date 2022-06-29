@@ -210,7 +210,7 @@ class CPU(val ws: Int) extends Module {
           when(regs(cmp) =/= 0.U) {
             pc := (pc.asSInt + offset.asSInt).asUInt
           }
-          result := regs(dl)
+          result := regs(dl) // ew
         }
         is("b1001".U) {
           result := pc
@@ -224,7 +224,7 @@ class CPU(val ws: Int) extends Module {
 
   when(state === s_writeback) {
     dl := inst(3, 0)
-    printf(p"writing back $inst, dl = $dl, result = $result\n")
+    printf(p"writing back $inst, dl = $dl, result = $result, jump to $pc\n")
     regs(dl) := result
     regs(pc_reg) := pc
     when(io.halt) {
