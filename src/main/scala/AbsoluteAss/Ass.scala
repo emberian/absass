@@ -60,7 +60,7 @@ class ArithUnit(val ws: Int) extends Module {
     is(l_shr) { io.out := io.d >> io.s }
     is(l_asr) {
       when(io.s < ws.U) { io.out := (io.d.asSInt >> io.s).asUInt }
-        .otherwise { io.out := Fill(ws, io.d(ws-1)) }
+        .otherwise { io.out := Fill(ws, io.d(ws - 1)) }
     }
     is(l_mul) { io.out := io.d * io.s }
     is(l_div) {
@@ -82,20 +82,14 @@ class ComparisonUnit(val ws: Int) extends Module {
     val gt = Input(Bool())
     val sn = Input(Bool())
     val iv = Input(Bool())
-    val out = Output(UInt(ws.W))
+    val out = Output(Bool())
   })
 
-  val cnd = 0.U
-  when(io.eq && io.d === io.s) { cnd := 1.U }
-  when(io.gt) {
-    when(io.sn) {
-      when(io.d.asSInt > io.s.asSInt) { cnd := 1.U }
-    }.otherwise {
-      when(io.d > io.s) { cnd := 1.U }
-    }
-  }
-  when(io.iv) { cnd := !cnd }
-  when(cnd === 0.U) { io.out := 1.U }.otherwise { io.out := 0.U }
+  val eq = io.eq && io.d === io.s
+  val gt =
+    (io.gt && io.sn && (io.d.asSInt > io.s.asSInt) || (io.gt && !io.sn && io.d > io.s))
+  val cnd = eq || gt
+  when(io.iv) { io.out := !cnd }.otherwise { io.out := cnd }
 }
 
 class CPU(val ws: Int) extends Module {
@@ -120,14 +114,14 @@ class CPU(val ws: Int) extends Module {
   val dl = 0.U
   val sp = 0.U
 
-  when (!io.halt) {
+  when(!io.halt) {
     pc := regs(pc_reg)
     io.mem_addr.bits := pc
     io.is_write := false.B
     io.mem_addr.valid := true.B
 
     io.mem_content.ready := true.B
-    when (io.mem_content.valid) {
+    when(io.mem_content.valid) {
       inst := io.mem_content.bits
       io.mem_addr.valid := false.B
 
@@ -135,10 +129,10 @@ class CPU(val ws: Int) extends Module {
       dl := inst(3, 0)
       sp := inst(7, 4)
 
-      when (inst(15, 14) === "b01".U) {
+      when(inst(15, 14) === "b01".U) {
         // data transfer
       }.otherwise {
-        switch (inst(15, 12)) {
+        switch(inst(15, 12)) {
           is("b0001".U) {
             logic.io.p := regs(dl)
             logic.io.q := regs(sp)
@@ -181,5 +175,5 @@ class CPU(val ws: Int) extends Module {
 import chisel3.stage.ChiselStage
 
 object AssDriver extends App {
-  (new ChiselStage).emitVerilog(new CPU(16), args)
+  (new ChiselStage).emitVerilog(new ComparisonUnit(2), args)
 }
