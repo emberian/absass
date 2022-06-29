@@ -126,18 +126,18 @@ class CPU(val ws: Int) extends Module {
   io.insn_addr.valid := false.B
   io.insn_addr.bits := 0.U
   io.insn_content.ready := false.B
-  compare.io.d := 0.U
-  compare.io.s := 0.U
-  compare.io.eq := 0.U
-  compare.io.gt := 0.U
-  compare.io.sn := 0.U
-  compare.io.iv := 0.U
-  logic.io.p := 0.U
-  logic.io.q := 0.U
-  logic.io.op := 0.U
-  arith.io.d := 0.U
-  arith.io.s := 0.U
-  arith.io.op := 0.U
+  compare.io.d := DontCare
+  compare.io.s := DontCare
+  compare.io.eq := DontCare
+  compare.io.gt := DontCare
+  compare.io.sn := DontCare
+  compare.io.iv := DontCare
+  logic.io.p := DontCare
+  logic.io.q := DontCare
+  logic.io.op := DontCare
+  arith.io.d := DontCare
+  arith.io.s := DontCare
+  arith.io.op := DontCare
 
   io.reg.ready := true.B
 
@@ -176,7 +176,7 @@ class CPU(val ws: Int) extends Module {
     dl := inst(3, 0)
     sp := inst(7, 4)
 
-    printf(p"executing $inst, pc = $pc, regs = ${regs(0)} ${regs(1)} ${regs(2)}\n")
+    printf(p"executing ${Hexadecimal(inst)}, pc = ${regs(0)}\n")
 
     when(inst(15, 14) === "b01".U) {
       // data transfer
@@ -224,7 +224,7 @@ class CPU(val ws: Int) extends Module {
 
   when(state === s_writeback) {
     dl := inst(3, 0)
-    printf(p"writing back $inst, dl = $dl, result = $result, jump to $pc\n")
+    printf(p"setting reg $dl = $result, jump to $pc\n")
     regs(dl) := result
     regs(pc_reg) := pc
     when(io.halt) {
