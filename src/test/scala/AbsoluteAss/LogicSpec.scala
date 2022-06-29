@@ -9,22 +9,22 @@ class LogicSpec extends AnyFreeSpec with ChiselScalatestTester {
   "Logic operators obey their truth table" in {
     test(new LogicUnit(1)) { l =>
       val truth_tables = List(
-        (l.l_f, "0000"),
-        (l.l_nor, "0001"),
-        (l.l_nci, "0010"),
-        (l.l_np, "0011"),
-        (l.l_nmi, "0100"),
-        (l.l_nq, "0101"),
-        (l.l_xor, "0110"),
-        (l.l_nand, "0111"),
-        (l.l_and, "1000"),
-        (l.l_xnor, "1001"),
-        (l.l_q, "1010"),
-        (l.l_mi, "1011"),
-        (l.l_p, "1100"),
-        (l.l_ci, "1101"),
-        (l.l_or, "1110"),
-        (l.l_t, "1111")
+        (0, "0000"),
+        (1, "0001"),
+        (2, "0010"),
+        (3, "0011"),
+        (4, "0100"),
+        (5, "0101"),
+        (6, "0110"),
+        (7, "0111"),
+        (8, "1000"),
+        (9, "1001"),
+        (10, "1010"),
+        (11, "1011"),
+        (12, "1100"),
+        (13, "1101"),
+        (14, "1110"),
+        (15, "1111")
       )
 
       

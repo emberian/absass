@@ -33,7 +33,7 @@ class WrapperTest extends AnyFreeSpec with ChiselScalatestTester {
     
       poke(dut.io.cpu_running, true)
 
-      step(16)
+      step(24)
     
       assert(peek(dut.io.red_led2) == 1)
       assert(peekAt(cpu.regs, 1) == 0xF)

@@ -13,30 +13,11 @@ class LogicUnit(val ws: Int) extends Module {
     val out = Output(UInt(ws.W))
   })
 
-  val (l_f :: l_nor :: l_nci :: l_np :: l_nmi :: l_nq ::
-    l_xor :: l_nand :: l_and :: l_xnor :: l_q :: l_mi ::
-    l_p :: l_ci :: l_or :: l_t :: Nil) = Enum(16)
-
-  io.out := 0.U // otherwise the impossible untaken switch default makes us think the wire is uninitialized
-
-  switch(io.op) {
-    is(l_f) { io.out := 0.U }
-    is(l_nor) { io.out := ~(io.p | io.q) }
-    is(l_nci) { io.out := io.q & ~io.p }
-    is(l_np) { io.out := ~io.p }
-    is(l_nmi) { io.out := io.p & ~io.q }
-    is(l_nq) { io.out := ~io.q }
-    is(l_xor) { io.out := io.p ^ io.q }
-    is(l_nand) { io.out := ~(io.p & io.q) }
-    is(l_and) { io.out := io.p & io.q }
-    is(l_xnor) { io.out := ~(io.p ^ io.q) }
-    is(l_q) { io.out := io.q }
-    is(l_mi) { io.out := (io.p & io.q) | ~io.p }
-    is(l_p) { io.out := io.p }
-    is(l_ci) { io.out := io.p | ~io.q }
-    is(l_or) { io.out := io.p | io.q }
-    is(l_t) { io.out := Fill(ws, 1.U) }
+  val bools = VecInit(io.out.asBools)
+  for(bit <- 0 until ws) {
+    bools(bit) := io.op(io.q(bit) | (io.p(bit) << 1.U))
   }
+  io.out := bools.asUInt
 }
 
 class ArithUnit(val ws: Int) extends Module {
@@ -126,18 +107,30 @@ class CPU(val ws: Int) extends Module {
   io.insn_addr.valid := false.B
   io.insn_addr.bits := 0.U
   io.insn_content.ready := false.B
-  compare.io.d := DontCare
-  compare.io.s := DontCare
-  compare.io.eq := DontCare
-  compare.io.gt := DontCare
-  compare.io.sn := DontCare
-  compare.io.iv := DontCare
-  logic.io.p := DontCare
-  logic.io.q := DontCare
-  logic.io.op := DontCare
-  arith.io.d := DontCare
-  arith.io.s := DontCare
-  arith.io.op := DontCare
+  val compare_d = Reg(Word)
+  val compare_s = Reg(Word)
+  val compare_eq = Reg(Bool())
+  val compare_gt = Reg(Bool())
+  val compare_sn = Reg(Bool())
+  val compare_iv = Reg(Bool())
+  compare.io.d := compare_d
+  compare.io.s := compare_s
+  compare.io.eq := compare_eq
+  compare.io.gt := compare_gt
+  compare.io.sn := compare_sn
+  compare.io.iv := compare_iv
+  val logic_p = Reg(Word)
+  val logic_q = Reg(Word)
+  val logic_op = Reg(UInt(4.W))
+  logic.io.p := logic_p
+  logic.io.q := logic_q
+  logic.io.op := logic_op
+  val arith_d = Reg(Word)
+  val arith_s = Reg(Word)
+  val arith_op = Reg(Word)
+  arith.io.d := arith_d
+  arith.io.s := arith_s
+  arith.io.op := arith_op
 
   io.reg.ready := true.B
 
@@ -170,8 +163,6 @@ class CPU(val ws: Int) extends Module {
     io.insn_addr.valid := false.B
   }
 
-  val result = Reg(Word)
-
   when(state === s_execute) {
     dl := inst(3, 0)
     sp := inst(7, 4)
@@ -183,25 +174,23 @@ class CPU(val ws: Int) extends Module {
     }.otherwise {
       switch(inst(15, 12)) {
         is("b0001".U) {
-          logic.io.p := regs(dl)
-          logic.io.q := regs(sp)
-          logic.io.op := inst(11, 8)
-          result := logic.io.out
+          logic_p := regs(dl)
+          logic_q := regs(sp)
+          logic_op := inst(11, 8)
+          printf(p"logic op=$logic_op\n")
         }
         is("b0010".U) {
-          arith.io.d := regs(dl)
-          arith.io.s := regs(sp)
-          arith.io.op := inst(10, 8)
-          result := arith.io.out
+          arith_d := regs(dl)
+          arith_s := regs(sp)
+          arith_op := inst(10, 8)
         }
         is("b0011".U) {
-          compare.io.d := regs(dl)
-          compare.io.s := regs(sp)
-          compare.io.eq := inst(8)
-          compare.io.gt := inst(9)
-          compare.io.sn := inst(10)
-          compare.io.iv := inst(11)
-          result := compare.io.out
+          compare_d := regs(dl)
+          compare_s := regs(sp)
+          compare_eq := inst(8)
+          compare_gt := inst(9)
+          compare_sn := inst(10)
+          compare_iv := inst(11)
         }
         is("b1000".U) {
           // conditional
@@ -210,10 +199,8 @@ class CPU(val ws: Int) extends Module {
           when(regs(cmp) =/= 0.U) {
             pc := (pc.asSInt + offset.asSInt).asUInt
           }
-          result := regs(dl) // ew
         }
         is("b1001".U) {
-          result := pc
           pc := regs(sp)
         }
       }
@@ -224,8 +211,13 @@ class CPU(val ws: Int) extends Module {
 
   when(state === s_writeback) {
     dl := inst(3, 0)
-    printf(p"setting reg $dl = $result, jump to $pc\n")
-    regs(dl) := result
+    printf(p"writing back $inst, dl = $dl, jump to $pc, units logic=${logic.io.out}, arith=${arith.io.out}, compare=${compare.io.out}\n")
+    switch(inst(15, 12)) {
+      is("b0001".U) { regs(dl) := logic.io.out }
+      is("b0010".U) { regs(dl) := arith.io.out }
+      is("b0011".U) { regs(dl) := compare.io.out }
+      is("b1001".U) { regs(dl) := regs(pc) + 2.U  /* FIXME */ }
+    }
     regs(pc_reg) := pc
     when(io.halt) {
       state := s_idle
