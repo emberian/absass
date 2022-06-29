@@ -14,8 +14,8 @@ class LogicUnit(val ws: Int) extends Module {
   })
 
   val (l_f :: l_nor :: l_nci :: l_np :: l_nmi :: l_nq ::
-    l_xor :: l_nand :: l_and :: l_xnor :: l_p :: l_mi ::
-    l_q :: l_ci :: l_or :: l_t :: Nil) = Enum(16)
+    l_xor :: l_nand :: l_and :: l_xnor :: l_q :: l_mi ::
+    l_p :: l_ci :: l_or :: l_t :: Nil) = Enum(16)
 
   io.out := 0.U // otherwise the impossible untaken switch default makes us think the wire is uninitialized
 
@@ -30,9 +30,9 @@ class LogicUnit(val ws: Int) extends Module {
     is(l_nand) { io.out := ~(io.p & io.q) }
     is(l_and) { io.out := io.p & io.q }
     is(l_xnor) { io.out := ~(io.p ^ io.q) }
-    is(l_p) { io.out := io.p }
-    is(l_mi) { io.out := (io.p & io.q) | ~io.p }
     is(l_q) { io.out := io.q }
+    is(l_mi) { io.out := (io.p & io.q) | ~io.p }
+    is(l_p) { io.out := io.p }
     is(l_ci) { io.out := io.p | ~io.q }
     is(l_or) { io.out := io.p | io.q }
     is(l_t) { io.out := Fill(ws, 1.U) }
@@ -176,7 +176,7 @@ class CPU(val ws: Int) extends Module {
     dl := inst(3, 0)
     sp := inst(7, 4)
 
-    printf(p"executing $inst, pc = $pc, regs(2) = ${regs(2)}\n")
+    printf(p"executing $inst, pc = $pc, regs = ${regs(0)} ${regs(1)} ${regs(2)}\n")
 
     when(inst(15, 14) === "b01".U) {
       // data transfer
@@ -213,7 +213,6 @@ class CPU(val ws: Int) extends Module {
           result := regs(dl)
         }
         is("b1001".U) {
-          regs(dl) := pc
           result := pc
           pc := regs(sp)
         }
@@ -224,8 +223,10 @@ class CPU(val ws: Int) extends Module {
   }
 
   when(state === s_writeback) {
-    regs(pc_reg) := pc
+    dl := inst(3, 0)
+    printf(p"writing back $inst, dl = $dl, result = $result\n")
     regs(dl) := result
+    regs(pc_reg) := pc
     when(io.halt) {
       state := s_idle
     }.otherwise {
@@ -244,7 +245,7 @@ class CPUWrapper extends Module {
 
   val cpu = Module(new CPU(4))
 
-  val insns = VecInit(0x1322.U, 0x1311.U, 0x82fc.U)
+  val insns = VecInit(0x1322.U, 0x1a21.U, 0x82fc.U)
 
   cpu.io.insn_content.bits := 0.U
   cpu.io.insn_content.valid := false.B
