@@ -19,7 +19,7 @@ class CPUTest extends AnyFreeSpec with ChiselScalatestTester {
       poke(cpu.io.insn_content.bits, "b0001111100000001".U)
       poke(cpu.io.insn_content.valid, true)
 
-      step(5)
+      step(4)
 
       assert(peekAt(cpu.regs, 1) == 0xF)
     })

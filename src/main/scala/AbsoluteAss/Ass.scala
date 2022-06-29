@@ -170,11 +170,13 @@ class CPU(val ws: Int) extends Module {
     io.insn_addr.valid := false.B
   }
 
+  val result = Reg(Word)
+
   when(state === s_execute) {
     dl := inst(3, 0)
     sp := inst(7, 4)
 
-    printf(p"executing $inst, pc = $pc, regs = ${regs(2)}\n")
+    printf(p"executing $inst, pc = $pc, regs(2) = ${regs(2)}\n")
 
     when(inst(15, 14) === "b01".U) {
       // data transfer
@@ -184,13 +186,13 @@ class CPU(val ws: Int) extends Module {
           logic.io.p := regs(dl)
           logic.io.q := regs(sp)
           logic.io.op := inst(11, 8)
-          regs(dl) := logic.io.out
+          result := logic.io.out
         }
         is("b0010".U) {
           arith.io.d := regs(dl)
           arith.io.s := regs(sp)
           arith.io.op := inst(10, 8)
-          regs(dl) := arith.io.out
+          result := arith.io.out
         }
         is("b0011".U) {
           compare.io.d := regs(dl)
@@ -199,7 +201,7 @@ class CPU(val ws: Int) extends Module {
           compare.io.gt := inst(9)
           compare.io.sn := inst(10)
           compare.io.iv := inst(11)
-          regs(dl) := compare.io.out
+          result := compare.io.out
         }
         is("b1000".U) {
           // conditional
@@ -208,9 +210,11 @@ class CPU(val ws: Int) extends Module {
           when(regs(cmp) =/= 0.U) {
             pc := (pc.asSInt + offset.asSInt).asUInt
           }
+          result := regs(dl)
         }
         is("b1001".U) {
           regs(dl) := pc
+          result := pc
           pc := regs(sp)
         }
       }
@@ -221,6 +225,7 @@ class CPU(val ws: Int) extends Module {
 
   when(state === s_writeback) {
     regs(pc_reg) := pc
+    regs(dl) := result
     when(io.halt) {
       state := s_idle
     }.otherwise {
