@@ -210,7 +210,7 @@ class CPU(val ws: Int) extends Module {
           when(regs(cmp) =/= 0.U) {
             pc := (pc.asSInt + offset.asSInt).asUInt
           }
-          result := regs(dl)
+          result := regs(dl) // ew
         }
         is("b1001".U) {
           regs(dl) := pc
