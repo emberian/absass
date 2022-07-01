@@ -42,4 +42,12 @@ class LogicSpec extends AnyFreeSpec with ChiselScalatestTester {
       }
     }
   }
+  "Move works" in {
+    test(new LogicUnit(16)) { l => 
+      l.io.op.poke(0xa)
+      l.io.p.poke(0x1010)
+      l.io.q.poke(0x0101)
+      l.io.out.expect(0x0101)
+    }
+  }
 }
