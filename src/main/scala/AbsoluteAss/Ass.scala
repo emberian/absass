@@ -14,7 +14,7 @@ class LogicUnit(val ws: Int) extends Module {
   })
 
   val bools = VecInit(io.out.asBools)
-  for(bit <- 0 until ws) {
+  for (bit <- 0 until ws) {
     bools(bit) := io.op(io.q(bit) | (io.p(bit) << 1.U))
   }
   io.out := bools.asUInt
@@ -81,9 +81,13 @@ class CPU(val ws: Int) extends Module {
     val insn_content = Flipped(Decoupled(Insn))
 
     val halt = Input(Bool())
+  })
 
+  val dbg = IO(new Bundle {
     val reg = Flipped(Decoupled(UInt(4.W)))
     val reg_content = Decoupled(Word)
+
+    val cur_stage = Output(UInt(2.W))
   })
 
   val (s_idle :: s_fetch :: s_execute :: s_writeback :: Nil) = Enum(4)
@@ -107,39 +111,20 @@ class CPU(val ws: Int) extends Module {
   io.insn_addr.valid := false.B
   io.insn_addr.bits := 0.U
   io.insn_content.ready := false.B
-  val compare_d = Reg(Word)
-  val compare_s = Reg(Word)
-  val compare_eq = Reg(Bool())
-  val compare_gt = Reg(Bool())
-  val compare_sn = Reg(Bool())
-  val compare_iv = Reg(Bool())
-  compare.io.d := compare_d
-  compare.io.s := compare_s
-  compare.io.eq := compare_eq
-  compare.io.gt := compare_gt
-  compare.io.sn := compare_sn
-  compare.io.iv := compare_iv
-  val logic_p = Reg(Word)
-  val logic_q = Reg(Word)
-  val logic_op = Reg(UInt(4.W))
-  logic.io.p := logic_p
-  logic.io.q := logic_q
-  logic.io.op := logic_op
-  val arith_d = Reg(Word)
-  val arith_s = Reg(Word)
-  val arith_op = Reg(Word)
-  arith.io.d := arith_d
-  arith.io.s := arith_s
-  arith.io.op := arith_op
 
-  io.reg.ready := true.B
+  dbg.reg.ready := true.B
+  dbg.cur_stage := state
 
-  when(io.reg.valid) {
-    io.reg_content.bits := regs(io.reg.bits)
-    io.reg_content.valid := true.B
+  logic.io := DontCare
+  arith.io := DontCare
+  compare.io := DontCare
+  
+  when(dbg.reg.valid) {
+    dbg.reg_content.bits := regs(dbg.reg.bits)
+    dbg.reg_content.valid := true.B
   }.otherwise {
-    io.reg_content.bits := DontCare
-    io.reg_content.valid := false.B
+    dbg.reg_content.bits := DontCare
+    dbg.reg_content.valid := false.B
   }
 
   when(!io.halt && state === s_idle) {
@@ -163,6 +148,7 @@ class CPU(val ws: Int) extends Module {
     io.insn_addr.valid := false.B
   }
 
+  val result = RegInit(0.U)
   when(state === s_execute) {
     dl := inst(3, 0)
     sp := inst(7, 4)
@@ -174,23 +160,26 @@ class CPU(val ws: Int) extends Module {
     }.otherwise {
       switch(inst(15, 12)) {
         is("b0001".U) {
-          logic_p := regs(dl)
-          logic_q := regs(sp)
-          logic_op := inst(11, 8)
-          printf(p"logic op=$logic_op\n")
+          logic.io.q := regs(dl)
+          logic.io.p := regs(sp)
+          logic.io.op := inst(11, 8)
+          result := logic.io.out
+          printf(p"logic op=${inst(11, 8)}\n")
         }
         is("b0010".U) {
-          arith_d := regs(dl)
-          arith_s := regs(sp)
-          arith_op := inst(10, 8)
+          arith.io.d := regs(dl)
+          arith.io.s := regs(sp)
+          arith.io.op := inst(10, 8)
+          result := arith.io.out
         }
         is("b0011".U) {
-          compare_d := regs(dl)
-          compare_s := regs(sp)
-          compare_eq := inst(8)
-          compare_gt := inst(9)
-          compare_sn := inst(10)
-          compare_iv := inst(11)
+          compare.io.d := regs(dl)
+          compare.io.s := regs(sp)
+          compare.io.eq := inst(8)
+          compare.io.gt := inst(9)
+          compare.io.sn := inst(10)
+          compare.io.iv := inst(11)
+          result := compare.io.out
         }
         is("b1000".U) {
           // conditional
@@ -199,8 +188,10 @@ class CPU(val ws: Int) extends Module {
           when(regs(cmp) =/= 0.U) {
             pc := (pc.asSInt + offset.asSInt).asUInt
           }
+          result := regs(dl) // ew
         }
         is("b1001".U) {
+          result := pc
           pc := regs(sp)
         }
       }
@@ -211,13 +202,10 @@ class CPU(val ws: Int) extends Module {
 
   when(state === s_writeback) {
     dl := inst(3, 0)
-    printf(p"writing back $inst, dl = $dl, jump to $pc, units logic=${logic.io.out}, arith=${arith.io.out}, compare=${compare.io.out}\n")
-    switch(inst(15, 12)) {
-      is("b0001".U) { regs(dl) := logic.io.out }
-      is("b0010".U) { regs(dl) := arith.io.out }
-      is("b0011".U) { regs(dl) := compare.io.out }
-      is("b1001".U) { regs(dl) := regs(pc) + 2.U  /* FIXME */ }
-    }
+    printf(
+      p"writing back $inst, dl = $dl, jump to $pc, units logic=${logic.io.out}, arith=${arith.io.out}, compare=${compare.io.out}\n"
+    )
+    regs(dl) := result
     regs(pc_reg) := pc
     when(io.halt) {
       state := s_idle
@@ -258,12 +246,12 @@ class CPUWrapper extends Module {
     io.red_led0 := 0.U
   }
 
-  cpu.io.reg.bits := 1.U
-  cpu.io.reg.valid := true.B
-  cpu.io.reg_content.ready := true.B
+  cpu.dbg.reg.bits := 1.U
+  cpu.dbg.reg.valid := true.B
+  cpu.dbg.reg_content.ready := true.B
 
-  when(cpu.io.reg_content.valid) {
-    io.red_led2 := cpu.io.reg_content.bits
+  when(cpu.dbg.reg_content.valid) {
+    io.red_led2 := cpu.dbg.reg_content.bits
   }.otherwise {
     io.red_led2 := DontCare
   }
@@ -271,10 +259,11 @@ class CPUWrapper extends Module {
   val ctr = Counter(12_000_000)
   ctr.inc()
   io.red_led1 := ctr.value < 6_000_000.U
+
 }
 
 import chisel3.stage.ChiselStage
 
 object AssDriver extends App {
-  (new ChiselStage).emitVerilog(new CPUWrapper, args)
+  (new ChiselStage).emitVerilog(new CPU(16), args)
 }
