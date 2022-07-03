@@ -30,7 +30,7 @@ def logic_unit(p, q, op, out):
 
     return comb
 
-# FIXME: MyHDL can't yet transpile dynamic bit indexing
+# FIXME: MyHDL can't yet seem to transpile dynamic indexing
 # NB: carefully escape Verilog functions ($) with ($$) due to the use of a
 # template string
 logic_unit.verilog_code = '''
@@ -95,6 +95,10 @@ def comp_unit(d, s, eq, gt, sn, iv, out):
 CPU_STAGE = enum('IDLE', 'FETCH', 'EXEC', 'WRITEBACK')
 
 @block
+def mem_xlate_rd():
+    pass
+
+@block
 def cpu(addr, data, ready, valid, clk, halt, reset):
     width = len(addr)
 
@@ -115,6 +119,13 @@ def cpu(addr, data, ready, valid, clk, halt, reset):
     npc = Signal(intbv(0)[width:])
 
     reg = [Signal(modbv(0)[width:]) for _ in range(16)]
+    
+    # Temporaries used below
+    pc = intbv(0)[width:]
+    dl = intbv(0)[4:]
+    sp = intbv(0)[4:]
+    opcode = intbv(0)[4:]
+    a_code = intbv(0)[3:]
 
     @always_seq(clk.posedge, reset=reset)
     def tick():
@@ -129,27 +140,27 @@ def cpu(addr, data, ready, valid, clk, halt, reset):
                 inst.next = data
                 state.next = CPU_STAGE.EXEC
             else:
-                pc = reg[0]  # PC
+                pc[:] = reg[0]  # PC
                 addr.next = pc
                 npc.next = pc + 2
                 ready.next = True
         elif state == CPU_STAGE.EXEC:
-            dl = inst[4:0]
-            sp = inst[8:4]
+            dl[:] = inst[4:0]
+            sp[:] = inst[8:4]
             if inst[16:14] == 0b01:
-                pass  # TODO: data transfer
+                pass  # todo: data transfer
             else:
-                code = inst[16:12]
-                if code == 0b0001:
+                opcode[:] = inst[16:12]
+                if opcode == 0b0001:
                     d.next = reg[dl]
                     s.next = reg[sp]
                     l_op.next = inst[12:8]
-                elif code == 0b0010:
+                elif opcode == 0b0010:
                     d.next = reg[dl]
                     s.next = reg[sp]
                     # FIXME: the Verilog synth can't deal with this swizzle
                     #a_op.next = getattr(ARITH, ARITH._names[int(inst[11:8])])
-                    a_code = inst[11:8]
+                    a_code[:] = inst[11:8]
                     if a_code == 0:
                         a_op.next = ARITH.ADD
                     elif a_code == 1:
@@ -166,31 +177,31 @@ def cpu(addr, data, ready, valid, clk, halt, reset):
                         a_op.next = ARITH.DIV
                     elif a_code == 7:
                         a_op.next = ARITH.MOD
-                elif code == 0b0011:
+                elif opcode == 0b0011:
                     d.next = reg[dl]
                     s.next = reg[sp]
                     c_eq.next = inst[8]
                     c_gt.next = inst[9]
                     c_sn.next = inst[10]
                     c_iv.next = inst[11]
-                elif code == 0b1000:
+                elif opcode == 0b1000:
                     offset = inst[8:0]
                     cmp = inst[12:8]
                     if reg[cmp] != 0:
                         npc.next = npc.signed() + offset.signed()
-                elif code == 0b1001:
+                elif opcode == 0b1001:
                     reg[dl].next = npc
                     npc.next = reg[sp]
             state.next = CPU_STAGE.WRITEBACK
         elif state == CPU_STAGE.WRITEBACK:
-            dl = inst[4:0]
+            dl[:] = inst[4:0]
             if inst[16:14] != 0b01:
-                code = inst[16:12]
-                if code == 0b0001:
+                opcode[:] = inst[16:12]
+                if opcode == 0b0001:
                     reg[dl].next = l_out
-                elif code == 0b0010:
+                elif opcode == 0b0010:
                     reg[dl].next = a_out
-                elif code == 0b0011:
+                elif opcode == 0b0011:
                     if c_out:
                         reg[dl].next = 1
                     else:
@@ -199,6 +210,10 @@ def cpu(addr, data, ready, valid, clk, halt, reset):
             if halt:
                 state.next = CPU_STAGE.IDLE
             else:
+                pc[:] = npc
+                addr.next = pc
+                npc.next = pc + 2
+                ready.next = True
                 state.next = CPU_STAGE.FETCH
 
     return logic, arith, comp, tick
