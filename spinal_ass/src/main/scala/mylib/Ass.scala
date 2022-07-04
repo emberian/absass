@@ -275,6 +275,7 @@ class CPU(val ws: Int) extends Module {
           io.write_port.valid := False
           io.mem_addr.valid := False
           io.mem_is_write := False
+          pc_stowed := False
           when(io.halt) {
             state := Stages.s_idle
           }.otherwise {
