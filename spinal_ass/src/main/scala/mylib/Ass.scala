@@ -34,7 +34,7 @@ class LogicUnit(val ws: Int) extends Component {
 
   for (bit <- 0 until ws) {
     io.res(bit) := io.op(
-      io.p(bit).asUInt(2 bits) | io.q(bit).asUInt(1 bits) << 1
+      io.q(bit).asUInt(2 bits) | (io.p(bit).asUInt(1 bits) << 1)
     )
   }
 }
@@ -60,7 +60,7 @@ class ArithUnit(val ws: Int) extends Module {
     is(ArithOps.l_shl) { io.res := io.d |<< io.s }
     is(ArithOps.l_shr) { io.res := io.d |>> io.s }
     is(ArithOps.l_asr) {
-      when(io.s < ws) { io.res := (io.d.asSInt >> io.s).asUInt }
+      when(io.s < ws) { io.res := io.d >> io.s }
         .otherwise { io.res.setAllTo(io.d(ws - 1)) }
     }
     is(ArithOps.l_mul) { io.res := (io.d * io.s).resize(ws bits) }
@@ -147,8 +147,8 @@ class CPU(val ws: Int) extends Module {
   val pc = Reg(Word)
   val inst = Reg(UInt(16 bits))
 
-  val dl = Reg(Word)
-  val sp = Reg(Word)
+  val dl = Reg(UInt(4 bits))
+  val sp = Reg(UInt(4 bits))
 
   io.insn_addr.valid := False
   io.insn_addr.payload := 0
@@ -208,7 +208,7 @@ class CPU(val ws: Int) extends Module {
       val sindir = inst(13)
       val smode = inst(12 downto 11)
 
-      val scont = Reg(Word) init(0)
+      val scont = Reg(Word) init (0)
       val sready = Reg(Bool()) init (False)
       val dready = Reg(Bool()) init (False)
       val pc_stowed = Reg(Bool()) init (False)
@@ -345,14 +345,14 @@ class CPU(val ws: Int) extends Module {
 //Generate the MyTopLevel's Verilog
 object MyTopLevelVerilog {
   def main(args: Array[String]) {
-    SpinalVerilog(new CPU(4))
+    SpinalVerilog(new CPU(16))
   }
 }
 
 //Generate the MyTopLevel's VHDL
 object MyTopLevelVhdl {
   def main(args: Array[String]) {
-    SpinalVhdl(new CPU(4))
+    SpinalVhdl(new CPU(16))
   }
 }
 
