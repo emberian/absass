@@ -10,7 +10,6 @@ object LogicSim {
   def main(args: Array[String]) {
     SimConfig.withWave.doSim(new LogicUnit(4)) { dut =>
       // Fork a process to generate the reset and the clock on the dut
-      dut.clockDomain.forkStimulus(period = 10)
 
       val truth_tables = List(
         (0, "0000"),
@@ -37,10 +36,11 @@ object LogicSim {
         for ((p, q) <- List((1, 1), (1, 0), (0, 1), (0, 0))) {
           dut.io.p #= p
           dut.io.q #= q
+
+          sleep(1)
           val expected = if (result_string(ix) == '0') { 0 }
           else { 1 }
-          dut.clockDomain.waitRisingEdge()
-          assert(dut.io.res.toInt == expected)
+          assert(dut.io.res.toInt == expected, s"${dut.io.res.toInt} == $expected for p=$p op=$logic_op q=$q")
         }
       }
     }
@@ -49,10 +49,10 @@ object LogicSim {
 
 object ArithSim {
   def main(args: Array[String]) {
-    SimConfig.withWave.doSim(new ArithUnit(4)) { arith =>
+    SimConfig.withWave.doSim(new ArithUnit(16)) { arith =>
       def test_unit(
           aunit: ArithUnit,
-          op: SpinalEnumElement[ArithOps.type],
+          op: ArithOps.E,
           c: (Int, Int) => Int
       ) = {
         val r = new scala.util.Random()
@@ -67,7 +67,7 @@ object ArithSim {
           aunit.io.op #= op
           aunit.io.d #= a;
           aunit.io.s #= b;
-          aunit.clockDomain.waitRisingEdge()
+          sleep(1)
           val real = aunit.io.res.toInt
           val sop =
             List("+", "-", "<<", ">>", ">>>", "*", "/", "%")(
@@ -221,10 +221,41 @@ object ComparisonSim {
   }
 }
 
+object CPUSim {
+  def main(args: Array[String]) {
+    SimConfig.withWave.doSim(new CPU(4)) { cpu =>
+      def exec_insn(c: CPU, i: Int) = {
+        assert(c.io.insn_content.ready == 1)
+        c.io.insn_content.payload #= i
+        c.io.insn_content.valid #= true
+        c.clockDomain.waitRisingEdge()
+        c.io.insn_content.valid #= true
+        while (c.dbg.cur_stage != 1) { c.clockDomain.waitRisingEdge() }
+      }
+      def pc(c: CPU): BigInt = {
+        assert(c.io.insn_addr.valid == 1)
+        c.io.insn_addr.payload.toBigInt
+      }
+
+      cpu.io.halt #= false
+      cpu.clockDomain.waitRisingEdge()
+
+      assert(pc(cpu) == 0)
+      exec_insn(cpu, 0x1f11)
+
+      assert(cpu.regs(1) == 0xf)
+      cpu.regs(2) #= 0xf
+      exec_insn(cpu, 0x1a23)
+      assert(cpu.regs(3) == 0xf)
+    }
+  }
+}
+
 object TestAll {
   def main(args: Array[String]) {
     LogicSim.main(args)
     ArithSim.main(args)
     ComparisonSim.main(args)
+    CPUSim.main(args)
   }
 }

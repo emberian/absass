@@ -26,30 +26,31 @@ import scala.util.Random
 //Hardware definition
 class LogicUnit(val ws: Int) extends Component {
   val io = new Bundle {
-    val p = in  UInt(ws bits)
-    val q = in  UInt(ws bits)
-    val op  = in UInt(4 bits)
-    val res = out UInt(ws bits)
+    val p = in UInt (ws bits)
+    val q = in UInt (ws bits)
+    val op = in UInt (4 bits)
+    val res = out UInt (ws bits)
   }
 
   for (bit <- 0 until ws) {
-    io.res(bit) := io.op(io.p(bit).asUInt(2 bits) | io.q(bit).asUInt(1 bits)<<1)
+    io.res(bit) := io.op(
+      io.p(bit).asUInt(2 bits) | io.q(bit).asUInt(1 bits) << 1
+    )
   }
 }
 
 object ArithOps extends SpinalEnum {
-  val l_add , l_sub , l_shl , l_shr , l_asr , l_mul , l_div , l_mod  =
+  val l_add, l_sub, l_shl, l_shr, l_asr, l_mul, l_div, l_mod =
     newElement()
 
 }
 class ArithUnit(val ws: Int) extends Module {
   val io = new Bundle {
-    val d = in UInt(ws bits)
-    val s = in UInt(ws bits)
-    val op = in (ArithOps())
-    val res = out UInt(ws bits)
+    val d = in UInt (ws bits)
+    val s = in UInt (ws bits)
+    val op = in(ArithOps())
+    val res = out UInt (ws bits)
   }
-
 
   val signed_max = (1 << (ws - 1) - 1)
 
@@ -76,13 +77,13 @@ class ArithUnit(val ws: Int) extends Module {
 
 class ComparisonUnit(val ws: Int) extends Module {
   val io = new Bundle {
-    val d = in UInt(ws bits)
-    val s = in UInt(ws bits)
-    val eq = in Bool()
-    val gt = in Bool()
-    val sn = in Bool()
-    val iv = in Bool()
-    val res = out Bool()
+    val d = in UInt (ws bits)
+    val s = in UInt (ws bits)
+    val eq = in Bool ()
+    val gt = in Bool ()
+    val sn = in Bool ()
+    val iv = in Bool ()
+    val res = out Bool ()
   }
 
   val eq = io.eq && io.d === io.s
@@ -92,8 +93,8 @@ class ComparisonUnit(val ws: Int) extends Module {
   when(io.iv) { io.res := !cnd }.otherwise { io.res := cnd }
 }
 
-object Stages extends SpinalEnum { 
-    val s_idle , s_fetch , s_execute , s_writeback = newElement()
+object Stages extends SpinalEnum {
+  val s_idle, s_fetch, s_execute, s_writeback = newElement()
 }
 
 class CPU(val ws: Int) extends Module {
@@ -103,12 +104,16 @@ class CPU(val ws: Int) extends Module {
     val insn_addr = master Stream (Word)
     val insn_content = slave Stream (Insn)
 
-    val halt = in  Bool()
+    val mem_addr = master Stream (Word)
+    val read_port = slave Stream (Word)
+    val write_port = master Stream (Word)
+    val mem_is_write = out Bool ()
+    val halt = in Bool ()
   }
 
   val dbg = new Bundle {
-    val reg = slave Stream(UInt(4 bits))
-    val reg_content = master Stream(UInt(ws bits))
+    val reg = slave Stream (UInt(4 bits))
+    val reg_content = master Stream (UInt(ws bits))
 
     val cur_stage = out(Stages())
   }
@@ -148,9 +153,15 @@ class CPU(val ws: Int) extends Module {
   io.insn_addr.payload := 0
   io.insn_content.ready := False
 
+  io.mem_addr.valid := False
+  io.mem_addr.payload := 0
+  io.write_port.valid := False
+  io.write_port.payload := 0
+  io.mem_is_write := False
+  io.read_port.ready := False
   dbg.reg.ready := True
   dbg.cur_stage := state
-  
+
   when(dbg.reg.valid) {
     dbg.reg_content.payload := regs(dbg.reg.payload)
     dbg.reg_content.valid := True
@@ -180,9 +191,9 @@ class CPU(val ws: Int) extends Module {
     io.insn_addr.valid := False
   }
 
-  val result = Reg(UInt(ws bits))
+  val result = Reg(Word)
 
-  result:=0
+  result := 0
   when(state === Stages.s_execute) {
     dl := inst(3 downto 0)
     sp := inst(7 downto 4)
@@ -191,6 +202,64 @@ class CPU(val ws: Int) extends Module {
 
     when(inst(15 downto 14) === 1) {
       // data transfer
+      val dindir = inst(10)
+      val dmode = inst(9 downto 8)
+      val sindir = inst(13)
+      val smode = inst(12 downto 11)
+
+      val daddr = Reg(Word)
+      val scont = Reg(Word)
+      val sready = Reg(Bool())
+      val dready = Reg(Bool())
+      regs(pc_reg) := pc
+      when(sindir) {
+        if (smode == 2) { regs(sp) := regs(sp) - (ws / 8) }
+        scont := regs(sp)
+        io.mem_addr.valid := True
+        io.mem_addr.payload := scont
+        io.read_port.ready := True
+        when(io.read_port.valid) {
+          scont := io.read_port.payload
+          sready := True
+        }
+      }.otherwise {
+        if (smode == 2) { scont := regs(sp) - (ws / 8) }
+        else if (smode == 0 || smode == 1) { scont := regs(sp) }
+        else if (smode == 3) { scont.setAll() }
+        sready := True
+      }
+      when(sready) {
+        io.mem_addr.valid := False
+        io.read_port.ready := False
+        if (smode == 1) { regs(sp) := regs(sp) + (ws / 8) }
+
+        when(dindir) {
+          if (dmode == 2) { regs(dl) := regs(dl) - (ws / 8) }
+          daddr := regs(dl)
+          io.mem_addr.valid := True
+          io.mem_addr.payload := daddr
+          io.write_port.valid := True
+          io.mem_is_write := True
+          io.write_port.payload := scont
+          when(io.write_port.ready) {
+            if (dmode == 1) { regs(dl) := regs(dl) + (ws / 8) }
+            dready := True
+          }
+        }.otherwise {
+          if (dmode == 2) { daddr := regs(dl) - (ws / 8) }
+          else { daddr := regs(dl) }
+          dready := True
+        }
+
+        when(dready) {
+          io.write_port.valid := False
+          io.mem_addr.valid := False
+          if (dmode == 1) {
+            regs(dl) := regs(dl) + (ws / 8)
+          }
+          state := Stages.s_fetch
+        }
+      }
     }.otherwise {
       switch(inst(15 downto 12)) {
         is(1) {
@@ -229,9 +298,9 @@ class CPU(val ws: Int) extends Module {
           pc := regs.read(sp)
         }
       }
+      state := Stages.s_writeback
     }
 
-    state := Stages.s_writeback
   }
 
   regs.allowOverride
@@ -250,7 +319,6 @@ class CPU(val ws: Int) extends Module {
   }
 }
 
-
 //Generate the MyTopLevel's Verilog
 object MyTopLevelVerilog {
   def main(args: Array[String]) {
@@ -265,9 +333,11 @@ object MyTopLevelVhdl {
   }
 }
 
-
 //Define a custom SpinalHDL configuration with synchronous reset instead of the default asynchronous one. This configuration can be resued everywhere
-object MySpinalConfig extends SpinalConfig(defaultConfigForClockDomains = ClockDomainConfig(resetKind = SYNC))
+object MySpinalConfig
+    extends SpinalConfig(
+      defaultConfigForClockDomains = ClockDomainConfig(resetKind = SYNC)
+    )
 
 //Generate the MyTopLevel's Verilog using the above custom configuration.
 object MyTopLevelVerilogWithCustomConfig {
