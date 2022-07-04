@@ -201,15 +201,15 @@ impl Machine {
             }
             Insn::Arith { src, dst, op } => {
                 self.regs[dst] = match op {
-                    ArithOp::Add => self.regs[src].wrapping_add(self.regs[dst]),
+                    ArithOp::Add => self.regs[dst].wrapping_add(self.regs[src]),
                     // make the rest of the code wrapping
-                    ArithOp::Sub => self.regs[src].wrapping_sub(self.regs[dst]),
-                    ArithOp::Shl => self.regs[src] << self.regs[dst],
-                    ArithOp::Shr => self.regs[src] >> self.regs[dst],
-                    ArithOp::Asr => self.regs[src] >> self.regs[dst],
-                    ArithOp::Mul => self.regs[src].wrapping_mul(self.regs[dst]),
-                    ArithOp::Div => self.regs[src] / self.regs[dst],
-                    ArithOp::Mod => self.regs[src] % self.regs[dst],
+                    ArithOp::Sub => self.regs[dst].wrapping_sub(self.regs[src]),
+                    ArithOp::Shl => self.regs[dst] << self.regs[src],
+                    ArithOp::Shr => self.regs[dst] >> self.regs[src],
+                    ArithOp::Asr => self.regs[dst] >> self.regs[src],
+                    ArithOp::Mul => self.regs[dst].wrapping_mul(self.regs[src]),
+                    ArithOp::Div => self.regs[dst] / self.regs[src],
+                    ArithOp::Mod => self.regs[dst] % self.regs[src],
                 };
             }
             Insn::Compare {
