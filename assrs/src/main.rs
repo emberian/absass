@@ -1,3 +1,5 @@
+use std::io::{BufRead, Read};
+
 #[derive(Debug, Hash, Clone, Copy)]
 pub enum MoveMode {
     Direct,
@@ -158,8 +160,8 @@ impl Insn {
                     iv: iv != 0,
                 }
             }
-            0x4000 => {
-                let src = (val & 0xf00) >> 4;
+            0x4000..=0x7000 => {
+                let src = (val & 0xf0) >> 4;
                 let dst = val & 0xf;
                 let s_mode = (val & 0x800) >> 11;
                 let s_deref = (val & 0x1000) >> 12;
@@ -190,7 +192,7 @@ impl Machine {
         match i {
             Insn::Logic { src, dst, op } => {
                 let mut res: Word = 0;
-                for i in 0..(WORDSZ*8) {
+                for i in 0..(WORDSZ * 8) {
                     let ix =
                         (self.regs[src] & (1 << i)) >> i | ((self.regs[dst] & (1 << i)) >> i << 1);
                     res |= (((op & (1 << ix)) as Word) >> ix) << i;
@@ -291,26 +293,52 @@ impl Machine {
 }
 
 fn main() {
-    let mut m = Machine {
-        regs: [0; 16],
-        memory: vec![0; 0x10000],
-        pc: 0,
-    };
-    m.step(Insn::Logic {
-        src: 1,
-        dst: 1,
-        op: 0xf,
-    });
-    assert_eq!(m.regs[1], !0);
-    m.regs[3] = 0x8;
+    match std::env::args().nth(1).as_deref() {
+        Some("test") => {
+            let mut m = Machine {
+                regs: [0; 16],
+                memory: vec![0; 0x10000],
+                pc: 0,
+            };
+            m.step(Insn::Logic {
+                src: 1,
+                dst: 1,
+                op: 0xf,
+            });
+            assert_eq!(m.regs[1], !0);
+            m.regs[3] = 0x8;
 
-    m.step(Insn::Move {
-        src: 1,
-        dst: 3,
-        s_mode: MoveMode::Direct,
-        s_deref: false,
-        d_mode: MoveMode::Direct,
-        d_deref: true,
-    });
-    assert_eq!(m.memory[0x8 as usize], 0xff);
+            m.step(Insn::Move {
+                src: 1,
+                dst: 3,
+                s_mode: MoveMode::Direct,
+                s_deref: false,
+                d_mode: MoveMode::Direct,
+                d_deref: true,
+            });
+            assert_eq!(m.memory[0x8 as usize], 0xff);
+        }
+        Some("disasm") => {
+            let mut insn_buf = [0u8; 2];
+            let mut i = std::io::stdin().lock();
+            while let Ok(2) = i.read(&mut insn_buf) {
+                println!(
+                    "{:?}",
+                    Insn::decode((insn_buf[0] as u16) << 8 | insn_buf[1] as u16)
+                );
+            }
+        }
+        Some("dishex") => {
+            for l in std::io::stdin().lock().lines() {
+                let l = l.unwrap();
+                let l = l.trim_start_matches("0x");
+
+                let iv = Insn::decode(u16::from_str_radix(l, 16).unwrap());
+                println!("{:?}", iv);
+            }
+        }
+
+        Some(_) => eprintln!("no such command!"),
+        None => eprintln!("no command given!"),
+    }
 }
