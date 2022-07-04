@@ -14,5 +14,5 @@ lazy val mylib = (project in file("."))
     name := "Ass",
     libraryDependencies ++= Seq(spinalCore, spinalLib, spinalIdslPlugin)
   )
- 
+
 fork := true

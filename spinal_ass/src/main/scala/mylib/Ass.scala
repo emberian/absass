@@ -108,6 +108,7 @@ class CPU(val ws: Int) extends Module {
     val read_port = slave Stream (Word)
     val write_port = master Stream (Word)
     val mem_is_write = out Bool ()
+
     val halt = in Bool ()
   }
 
@@ -175,8 +176,8 @@ class CPU(val ws: Int) extends Module {
   }
 
   when(state === Stages.s_fetch) {
-    pc := regs(pc_reg)
-    io.insn_addr.payload := pc
+    pc := regs(pc_reg) + 2
+    io.insn_addr.payload := regs(pc_reg)
     io.insn_addr.valid := True
     io.insn_content.ready := True
     when(io.insn_content.valid) {
@@ -184,7 +185,6 @@ class CPU(val ws: Int) extends Module {
       io.insn_addr.valid := False
       io.insn_content.ready := False
       state := Stages.s_execute
-      pc := pc + 2
     }
   }.otherwise {
     io.insn_content.ready := False
@@ -194,6 +194,7 @@ class CPU(val ws: Int) extends Module {
   val result = Reg(Word)
 
   result := 0
+
   when(state === Stages.s_execute) {
     dl := inst(3 downto 0)
     sp := inst(7 downto 4)
@@ -207,57 +208,78 @@ class CPU(val ws: Int) extends Module {
       val sindir = inst(13)
       val smode = inst(12 downto 11)
 
-      val daddr = Reg(Word)
-      val scont = Reg(Word)
-      val sready = Reg(Bool())
-      val dready = Reg(Bool())
-      regs(pc_reg) := pc
-      when(sindir) {
-        if (smode == 2) { regs(sp) := regs(sp) - (ws / 8) }
-        scont := regs(sp)
-        io.mem_addr.valid := True
-        io.mem_addr.payload := scont
-        io.read_port.ready := True
-        when(io.read_port.valid) {
-          scont := io.read_port.payload
-          sready := True
-        }
-      }.otherwise {
-        if (smode == 2) { scont := regs(sp) - (ws / 8) }
-        else if (smode == 0 || smode == 1) { scont := regs(sp) }
-        else if (smode == 3) { scont.setAll() }
-        sready := True
-      }
-      when(sready) {
-        io.mem_addr.valid := False
-        io.read_port.ready := False
-        if (smode == 1) { regs(sp) := regs(sp) + (ws / 8) }
+      val scont = Reg(Word) init(0)
+      val sready = Reg(Bool()) init (False)
+      val dready = Reg(Bool()) init (False)
+      val pc_stowed = Reg(Bool()) init (False)
 
-        when(dindir) {
-          if (dmode == 2) { regs(dl) := regs(dl) - (ws / 8) }
-          daddr := regs(dl)
+      regs(pc_reg) := pc
+      pc_stowed := True
+
+      when(pc_stowed) {
+        dready := False
+        sready := False
+        when(sindir) {
+          val pres = Reg(Bool()) init (False)
+          val sc = 0
+          when(smode === 2) {
+            regs(sp) := regs(sp) - (ws / 8); sc := regs(sp) - (ws / 8)
+          } otherwise { sc := regs(sp) }
           io.mem_addr.valid := True
-          io.mem_addr.payload := daddr
-          io.write_port.valid := True
-          io.mem_is_write := True
-          io.write_port.payload := scont
-          when(io.write_port.ready) {
-            if (dmode == 1) { regs(dl) := regs(dl) + (ws / 8) }
-            dready := True
+          io.mem_addr.payload := sc
+          io.read_port.ready := True
+          io.mem_is_write := False
+          when(io.read_port.valid) {
+            when(smode === 1) { regs(sp) := regs(sp) + (ws / 8) }
+            scont := io.read_port.payload
+            sready := True
           }
         }.otherwise {
-          if (dmode == 2) { daddr := regs(dl) - (ws / 8) }
-          else { daddr := regs(dl) }
-          dready := True
+          switch(smode) {
+            is(2) { scont := regs(sp) - (ws / 8) }
+            is(0) { scont := regs(sp) }
+            is(3) { scont.setAll() }
+            is(1) { scont := regs(sp); regs(sp) := regs(sp) + (ws / 8) }
+          }
+          sready := True
+        }
+        when(sready) {
+          io.mem_addr.valid := False
+          io.read_port.ready := False
+          when(dindir) {
+            val daddr = 0
+            when(dmode === 2) {
+              regs(dl) := regs(dl) - (ws / 8); daddr := regs(dl) - (ws / 8)
+            } otherwise { daddr := regs(dl) }
+            io.mem_addr.valid := True
+            io.mem_addr.payload := daddr
+            io.write_port.valid := True
+            io.mem_is_write := True
+            io.write_port.payload := scont
+            when(io.write_port.ready) {
+              when(dmode === 1) { regs(dl) := regs(dl) + (ws / 8) }
+              dready := True
+            }
+          }.otherwise {
+            switch(dmode) {
+              is(0) { regs(dl) := scont }
+              is(1) { regs(dl) := scont + (ws / 8) }
+              is(2) { regs(dl) := scont - (ws / 8) }
+              is(3) { regs(dl).setAll() }
+            }
+            dready := True
+          }
         }
 
         when(dready) {
           io.write_port.valid := False
           io.mem_addr.valid := False
-          if (dmode == 1) {
-            regs(dl) := regs(dl) + (ws / 8)
+          io.mem_is_write := False
+          when(io.halt) {
+            state := Stages.s_idle
+          }.otherwise {
+            state := Stages.s_fetch
           }
-          state := Stages.s_fetch
         }
       }
     }.otherwise {

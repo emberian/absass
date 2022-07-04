@@ -247,6 +247,8 @@ object CPUSim {
       cpu.regs(2) #= 0xf
       exec_insn(cpu, 0x1a23)
       assert(cpu.regs(3) == 0xf)
+
+      exec_insn(cpu, 0x4)
     }
   }
 }
