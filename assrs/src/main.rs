@@ -206,7 +206,7 @@ impl Machine {
                     ArithOp::Sub => self.regs[dst].wrapping_sub(self.regs[src]),
                     ArithOp::Shl => self.regs[dst] << self.regs[src],
                     ArithOp::Shr => self.regs[dst] >> self.regs[src],
-                    ArithOp::Asr => self.regs[dst] >> self.regs[src],
+                    ArithOp::Asr => ((self.regs[dst] as i64) >> self.regs[src]) as Word,
                     ArithOp::Mul => self.regs[dst].wrapping_mul(self.regs[src]),
                     ArithOp::Div => self.regs[dst] / self.regs[src],
                     ArithOp::Mod => self.regs[dst] % self.regs[src],
