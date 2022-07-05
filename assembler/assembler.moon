@@ -1,11 +1,14 @@
 class Assembler
-	new: (out) =>
+	new: (out, wordsize = 64) =>
 		if type(out) == "string"
 			out = io.open out, "wb"
 		@out = out
+		@wordsize = wordsize
+		@wordbytes = math.floor wordsize / 8
 		@labels = {}
 		@cur_global = nil
 		@origin = 0
+		@fixups = {}
 
 	trim: (s) =>
 		start = s\find "%S"
@@ -33,9 +36,42 @@ class Assembler
 		s\sub(1, @@ELLIPSIS) .. "..." if #s > @@ELLIPSIS
 		s
 
+	bit: (bl) =>
+		return 1 if bl
+		0
+
+	emit_byte: (by) =>
+		print "byte", by
+		@out\write string.char by
+		@origin += 1
+
 	emit: (ins) =>
-		@out\write string.char((ins >> 8) & 255) .. string.char(ins & 255)
-		@origin += 2
+		@emit_byte (ins >> 8) & 255
+		@emit_byte ins & 255
+
+	emit_word: (wd) =>
+		for btind = @wordbytes - 1, 0, -1
+			@emit_byte (wd >> (8 * btind)) & 0xff
+
+	emit_maybe_byte: (v) =>
+		if type(v) == "number"
+			@emit_byte v
+			return
+		if v.val
+			@emit_byte v.val
+			return
+		table.insert @fixups, {emit: 'byte', where: @origin, ref: v}
+		@emit_byte 0
+
+	emit_maybe_word: (v) =>
+		if type(v) == "number"
+			@emit_word v
+			return
+		if v.val
+			@emit_word v.val
+			return
+		table.insert @fixups, {emit: 'word', where: @origin, ref: v}
+		@emit_word 0
 
 	@OPCODE:
 		LOGIC: 0x1000
@@ -50,14 +86,45 @@ class Assembler
 		{:tbl, :src, :dst} = data
 		@emit (@@OPCODE.LOGIC | ((tbl&0xf)<<8) | ((src&0xf)<<4) | (dst&0xf))
 
+	e_xfer: (data) =>
+		{:src, :dst} = data
+		{ind: s_ind, mode: s_mode, reg: s_reg} = src
+		{ind: d_ind, mode: d_mode, reg: d_reg} = dst
+		s_ind, d_ind = @bit(s_ind), @bit(d_ind)
+		@emit (
+			@@OPCODE.XFER |
+			(d_reg & 0xf) |
+			((s_reg & 0xf) << 4) |
+			((d_mode & 0x3) << 8) |
+			(d_ind << 10) |
+			((s_mode & 0x3) << 11) |
+			(s_ind << 13)
+		)
+
+	p_num: (s) =>
+		s = @trim s
+		{:word, :rest} = @word s
+		num = tonumber(word)
+		return @ok num, rest if num
+		-- Try a label name instead
+		lbl = @p_labelname s
+		return @fail! unless lbl
+		{global: glob, local: loc} = lbl.val
+		addr = @get_label glob, loc
+		return @die "No address for label " .. glob .. "." .. loc, s unless addr
+		@ok addr, lbl.rest
+
 	p_reg: (s) =>
 		s = @trim s
 		{:word, :rest} = @word s
 
-		return @ok 0, rest if word == "PC"
+		return @ok 0, rest if word == "PC" or word == "PC,"
 
 		if word\sub(1, 1) == "R"
-			num = tonumber word\sub 2
+			numpart = word\sub 2
+			ix, ixf = numpart\find "%d+"
+			return @fail! unless ix
+			num = tonumber numpart\sub ix, ixf
 			if num and num >= 0 and num < 16
 				return @ok num, rest
 
@@ -87,6 +154,27 @@ class Assembler
 		return @fail! if lbl.rest\sub(1, 1) ~= ":"
 		@ok lbl.val, lbl.rest\sub 2
 
+	@MODES:
+		normal: 0
+		autoinc: 1
+		autodec: 2
+		ones: 3
+
+	p_xft: (s) =>
+		s = @trim s
+		ind, mode = false, @@MODES.normal
+		if s\sub(1, 1) == "*"
+			ind, s = true, @trim s\sub 2
+		if s\sub(1, 1) == "-"
+			mode, s = @@MODES.autodec, @trim s\sub 2
+		reg = @p_reg s
+		return @fail! unless reg
+		s = @trim reg.rest
+		if s\sub(1, 1) == "+"
+			return @die "conflicting modes for transfer", s if mode ~= @@MODES.normal
+			mode, s = @@MODES.autoinc, @trim s\sub 2
+		@ok {:ind, :mode, reg: reg.val}, s
+
 	@INSNS: {}
 	DECL_INSN = (nm, parse) -> @INSNS[nm] = {
 		:parse
@@ -110,7 +198,6 @@ class Assembler
 		s = @optcomma dst.rest
 		src = @p_reg s
 		return @die "expected source reg", s unless src
-		print 'MOV src', src.val, 'dst', dst.val
 		s = src.rest
 		@ok {
 			insn: "logic"
@@ -120,12 +207,94 @@ class Assembler
 				dst: dst.val
 		}, s
 
+	DECL_INSN ".BYTE", (s) =>
+		bytes = {}
+		while true
+			num = @p_num s
+			break unless num
+			table.insert bytes, num.val
+			s = @optcomma num.rest
+		@ok {
+			insn: "raw",
+			data: bytes
+		}, s
+
+	DECL_INSN "XF", (s) =>
+		dst = @p_xft s
+		return @die "expected dest transfer target", s unless dst
+		s = @optcomma dst.rest
+		src = @p_xft s
+		return @die "expected source transfer target", s unless src
+		s = src.rest
+		@ok {
+			insn: "xfer"
+			data:
+				dst: dst.val
+				src: src.val
+		}, s
+
+	DECL_INSN "LI", (s) =>
+		dst = @p_reg s
+		return @die "expected dest register", s unless dst
+		s = @optcomma dst.rest
+		num = @p_num s
+		return @die "expected immediate", s unless num
+		@ok {
+			insn: "seq"
+			data: {
+				{insn: "xfer", data:
+					dst:
+						reg: dst.val
+						mode: @@MODES.normal
+						ind: false
+					src:
+						reg: 0  -- PC
+						mode: @@MODES.autoinc
+						ind: true
+				},
+				{insn: "word", data: num.val}
+			}
+		}, num.rest
+
+	DECL_INSN "BIT", (s) =>
+		dst = @p_reg @trim s
+		return @die "expected dest register", s unless dst
+		s = @trim @optcomma dst.rest
+		src = @p_reg s
+		return @die "expected source register", s unless src
+		s = @trim @optcomma src.rest
+		op = @p_num s
+		return @die "expected operation", s unless op
+		@ok {
+			insn: "logic"
+			data:
+				tbl: op.val
+				src: src.val
+				dst: dst.val
+		}, op.rest
+
 	@EMITTERS: {}
 	DECL_EMIT = (ins, emit) -> @EMITTERS[ins] = {
 		:emit
 	}
 
 	DECL_EMIT "logic", (ins) => @e_logic ins.data
+
+	DECL_EMIT "xfer", (ins) =>
+		print "xfer", ins.data.src, ins.data.dst
+		@e_xfer ins.data
+
+	DECL_EMIT "raw", (ins) =>
+		for bt in *ins.data
+			@emit_maybe_byte bt
+
+	DECL_EMIT "word", (ins) => @emit_maybe_word ins.data
+
+	DECL_EMIT "seq", (ins) =>
+		for insn in *ins.data
+			einfo = @@EMITTERS[insn.insn]
+			error "No emitter for " .. insn.insn unless einfo
+			einfo.emit @, insn
 
 	set_label: (glob, loc, addr) =>
 		unless glob
@@ -136,7 +305,12 @@ class Assembler
 			@cur_global = glob
 		loc = '' unless loc
 		@labels[glob] = {} unless @labels[glob]
-		@labels[glob][loc] = addr
+		g = @labels[glob]
+		print 'WARN: Redefinition of label ' .. glob .. '.' .. loc if type(g[loc]) == 'number' or g.val
+		if type(g[loc]) == 'table'
+			g[loc].val = addr
+		else
+			g[loc] = addr
 
 	get_label: (glob, loc) =>
 		unless glob
@@ -144,7 +318,18 @@ class Assembler
 				error "Can't reference local label before first global label"
 			glob = @cur_global
 		loc = '' unless loc
-		@labels[glob][loc]
+		@labels[glob] = {} unless @labels[glob]
+		g = @labels[glob]
+		g[loc] = {forward: true, global: glob, local: loc} unless g[loc]
+		g[loc]
+
+	force: (v) =>
+		return v if type(v) == "number"
+		if type(v) == "table"
+			return v.val if v.val
+			{global: glob, local: loc} = v
+			error "Reference to label " .. glob .. '.' .. loc .. " undefined at time of emission"
+		error "Unknown type of value " .. type(v)
 
 	one: (s) =>
 		{:val, :rest} = @p_insn s
@@ -163,16 +348,37 @@ class Assembler
 		while #s > 0
 			break if s\find("%S") == nil
 			s = @one s
+		@fixup!
+
+	fixup: =>
+		print 'fixing'
+		for fix in *@fixups
+			@origin = fix.where
+			@out\seek("set", @origin)
+			{global: glob, local: loc} = fix.ref
+			val = @force @get_label glob, loc
+			print 'fix ' .. fix.emit .. ' at ' .. @origin .. ' to ' .. val
+			switch fix.emit
+				when "word" then @emit_word val
+				when "byte" then @emit_byte val
+				else error "Unknown fix type " .. fix.emit
 	
 	info: =>
 		print 'Labels:'
 		for glob, sub in pairs @labels
 			print '- ' .. glob .. ':'
 			for loc, addr in pairs sub
-				print '  - ' .. loc .. ' = ' .. tostring(addr)
+				if type(addr) == "number"
+					print '  - ' .. loc .. ' = ' .. tostring(addr)
+				else
+					print '  - ' .. loc .. ' = (forward) ' .. tostring(addr.val)
+
+unless arg[1]
+	print 'Usage: lua (this script) out.bin < in.asm'
+	return
 
 source = io.read "*a"
-assembler = Assembler "test.bin"
+assembler = Assembler arg[1], 16
 assembler\run source
 assembler\info!
 

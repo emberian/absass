@@ -1,5 +1,7 @@
-a: .b: MOV R0 R15
-MOV R15 R0
-.c: MOV R1 R0
-g: MOV R1 R1
-.a: MOV R2 R2
+BIT R2, R2, 9
+LI PC, forward
+again: MOV R1, R2
+LI R1, 0xabcd
+forward:
+LI PC, again
+
