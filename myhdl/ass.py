@@ -21,26 +21,10 @@ def logic_unit(p, q, op, out):
 
     @always_comb
     def comb():
-        res = intbv(0)[width:]
         for bit in range(width):
-            res[bit] = op[
-                    q(bit) | (p(bit) << 1)
-            ]
-        out.next = res
+            out.next[bit] = op[q[bit] | (p[bit] << 1)]
 
     return comb
-
-# FIXME: MyHDL can't yet seem to transpile dynamic indexing
-# NB: carefully escape Verilog functions ($) with ($$) due to the use of a
-# template string
-logic_unit.verilog_code = '''
-integer bit;
-always @(p, q, op) begin: LOGIC_UNIT_COMB
-    for(bit = 0; bit < $$size(out); bit = bit + 1) begin
-        out[bit] = op[q[bit] + (p[bit] <<< 1)];
-    end
-end
-'''
 
 ARITH = enum('ADD', 'SUB', 'SHL', 'SHR', 'ASR', 'MUL', 'DIV', 'MOD')
 
@@ -93,13 +77,14 @@ def comp_unit(d, s, eq, gt, sn, iv, out):
     return comb
 
 CPU_STAGE = enum('IDLE', 'FETCH', 'EXEC', 'WRITEBACK')
+XF_STAGE = enum('WB_PC', 'FETCH_SRC', 'WB_SRC', 'WRITE_DST', 'WB_DST')
 
 @block
 def mem_xlate_rd():
     pass
 
 @block
-def cpu(addr, data, ready, valid, clk, halt, reset):
+def cpu(addr, data_in, data_out, mode, ready, valid, clk, halt, reset):
     width = len(addr)
 
     state = Signal(CPU_STAGE.IDLE)
@@ -119,14 +104,9 @@ def cpu(addr, data, ready, valid, clk, halt, reset):
     npc = Signal(intbv(0)[width:])
 
     reg = [Signal(modbv(0)[width:]) for _ in range(16)]
+    xf = Signal(modbv(0)[width:])
+    xf_state = Signal(XF_STAGE.WB_PC)
     
-    # Temporaries used below
-    pc = intbv(0)[width:]
-    dl = intbv(0)[4:]
-    sp = intbv(0)[4:]
-    opcode = intbv(0)[4:]
-    a_code = intbv(0)[3:]
-
     @always_seq(clk.posedge, reset=reset)
     def tick():
         # Keep the branches of this if unmerged; it helps MyHDL realize that
@@ -137,20 +117,93 @@ def cpu(addr, data, ready, valid, clk, halt, reset):
         elif state == CPU_STAGE.FETCH:
             if valid:
                 ready.next = False
-                inst.next = data
+                inst.next = data_in[16:0]
                 state.next = CPU_STAGE.EXEC
             else:
-                pc[:] = reg[0]  # PC
+                pc = reg[0]  # PC
                 addr.next = pc
                 npc.next = pc + 2
+                mode.next = False
                 ready.next = True
         elif state == CPU_STAGE.EXEC:
-            dl[:] = inst[4:0]
-            sp[:] = inst[8:4]
+            dl = inst[4:0]
+            sp = inst[8:4]
             if inst[16:14] == 0b01:
-                pass  # todo: data transfer
+                dmode = inst[10:8]
+                dind = inst[10]
+                smode = inst[13:11]
+                sind = inst[13]
+                # Short: if we're writing all-1s to DST, just skip to that
+                if dmode == 3 and xf_state != XF_STAGE.WB_DST:
+                    xf_state.next = XF_STAGE.WB_DST
+                else:
+                    if xf_state == XF_STAGE.WB_PC:
+                        # This only needs to be done in case src or dst is the
+                        # PC, but nonetheless...
+                        reg[0].next = npc
+                        xf_state.next = XF_STAGE.FETCH_SRC
+                    elif xf_state == XF_STAGE.FETCH_SRC:
+                        sval = reg[sp]
+                        if smode == 3:
+                            xf.next = ~intbv(0)[width:]
+                            xf_state.next = XF_STAGE.WB_SRC
+                        elif sind:
+                            if smode == 2:
+                                sval -= width // 8
+                            if valid:
+                                ready.next = False
+                                xf.next = data_in
+                                xf_state.next = XF_STAGE.WB_SRC
+                            else:
+                                mode.next = False
+                                addr.next = sval
+                                ready.next = True
+                        else:
+                            xf.next = sval
+                            xf_state.next = XF_STAGE.WB_SRC
+                    elif xf_state == XF_STAGE.WB_SRC:
+                        sval = reg[sp]
+                        if smode == 1:
+                            reg[sp].next = sval + width // 8
+                        elif smode == 2:
+                            reg[sp].next = sval - width // 8
+                        xf_state.next = XF_STAGE.WRITE_DST
+                    elif xf_state == XF_STAGE.WRITE_DST:
+                        dval = reg[dl]
+                        if dind:
+                            if dmode == 2:
+                                dval -= width // 8
+                            if valid:
+                                ready.next = False
+                                xf_state.next = XF_STAGE.WB_DST
+                            else:
+                                mode.next = True
+                                addr.next = dval
+                                data_out.next = xf
+                                ready.next = True
+                        else:
+                            reg[dl].next = xf
+                            xf_state.next = XF_STAGE.WB_DST
+                    elif xf_state == XF_STAGE.WB_DST:
+                        dval = reg[dl]
+                        if dmode == 3:
+                            reg[dl].next = ~intbv(0)[width:]
+                        elif dmode == 2:
+                            reg[dl].next = dval - width / 8
+                        elif dmode == 1:
+                            reg[dl].next = dval + width / 8
+                        xf_state.next = XF_STAGE.WB_PC
+                        state.next = CPU_STAGE.FETCH
+                        if halt:
+                            state.next = CPU_STAGE.IDLE
+                        else:
+                            # Don't writeback PC, it could have been a source
+                            mode.next = False
+                            addr.next = reg[0]
+                            ready.next = True
+                            state.next = CPU_STAGE.FETCH
             else:
-                opcode[:] = inst[16:12]
+                opcode = inst[16:12]
                 if opcode == 0b0001:
                     d.next = reg[dl]
                     s.next = reg[sp]
@@ -160,7 +213,7 @@ def cpu(addr, data, ready, valid, clk, halt, reset):
                     s.next = reg[sp]
                     # FIXME: the Verilog synth can't deal with this swizzle
                     #a_op.next = getattr(ARITH, ARITH._names[int(inst[11:8])])
-                    a_code[:] = inst[11:8]
+                    a_code = inst[11:8]
                     if a_code == 0:
                         a_op.next = ARITH.ADD
                     elif a_code == 1:
@@ -192,11 +245,11 @@ def cpu(addr, data, ready, valid, clk, halt, reset):
                 elif opcode == 0b1001:
                     reg[dl].next = npc
                     npc.next = reg[sp]
-            state.next = CPU_STAGE.WRITEBACK
+                state.next = CPU_STAGE.WRITEBACK
         elif state == CPU_STAGE.WRITEBACK:
-            dl[:] = inst[4:0]
+            dl = inst[4:0]
             if inst[16:14] != 0b01:
-                opcode[:] = inst[16:12]
+                opcode = inst[16:12]
                 if opcode == 0b0001:
                     reg[dl].next = l_out
                 elif opcode == 0b0010:
@@ -210,9 +263,10 @@ def cpu(addr, data, ready, valid, clk, halt, reset):
             if halt:
                 state.next = CPU_STAGE.IDLE
             else:
-                pc[:] = npc
+                pc = npc
                 addr.next = pc
                 npc.next = pc + 2
+                mode.next = False
                 ready.next = True
                 state.next = CPU_STAGE.FETCH
 
@@ -304,10 +358,15 @@ def arith_test(w, tries=10000):
                 continue
             # XXX convert int to enum
             op.next = getattr(ARITH, ARITH._names[oval])
+            low = 0
+            if op.next in (ARITH.DIV, ARITH.MOD):
+                low = 1
+                if s == 0:  # Fix a hold-over bug from MUL before we tick
+                    s.next = 1
             yield delay(1)
 
             for _try in range(tries):
-                d.next, s.next = randrange(2**w), randrange(2**w)
+                d.next, s.next = randrange(2**w), randrange(low, 2**w)
                 yield delay(1)
                 print(f'{now()}:\t{d}\t{s}\t{op}\t={out}')
                 assert out == fnc(d, s) % 2**w
@@ -360,11 +419,14 @@ def comp_test(w, tries=10000):
     return unit, temporal
 
 @block
-def cpu_ram(words, addr, data, ready, valid):
+def cpu_ram(bs, addr, data_in, data_out, mode, ready, valid):
+    ws = len(addr) // 8
     @always_comb
     def comb():
         if ready:
-            data.next = words[int(addr) >> 1]
+            if mode:
+                bs[addr:addr+ws] = int(data_in).to_bytes(ws, 'big')
+            data_out.next[:] = int.from_bytes(bs[addr:addr+ws], 'big')
             valid.next = True
         else:
             valid.next = False
@@ -373,18 +435,20 @@ def cpu_ram(words, addr, data, ready, valid):
 @block
 def cpu_test(w, _ignored=0):
     addr = Signal(modbv(0)[w:])
-    data = Signal(modbv(0)[16:])
+    data_to_ram = Signal(modbv(0)[w:])
+    data_to_cpu = Signal(modbv(0)[w:])
+    mode = Signal(False)
     ready = Signal(False)
     valid = Signal(False)
     clk = Signal(False)
     halt = Signal(False)
     reset = ResetSignal(True, active=True, isasync=True)
 
-    cpu_unit = cpu(addr, data, ready, valid, clk, halt, reset)
+    cpu_unit = cpu(addr, data_to_cpu, data_to_ram, mode, ready, valid, clk, halt, reset)
     try_convert(cpu_unit)
     mem = cpu_ram(
-            [0x1322, 0x1a21, 0x82fc],
-            addr, data, ready, valid,
+            b'\x1b\x22\x1a\x21\x68\x03\xaa\xaa\x82\xfa',
+            addr, data_to_ram, data_to_cpu, mode, ready, valid,
     )
 
     @instance
@@ -393,7 +457,7 @@ def cpu_test(w, _ignored=0):
         yield delay(1)
         reset.next = False
         for step in range(48):
-            print(f'{now()}:\t{"tick" if clk else "tock"}\taddr={addr}\tdata={data}\tvalid={valid}\tready={ready}\tstate={cpu_unit.sigdict["state"]}\tinst={cpu_unit.sigdict["inst"]}\tregs={" ".join(bin(i.val, w) for i in cpu_unit.symdict["reg"])}')
+            print(f'{now()}:\t{"tick" if clk else "tock"}\taddr={addr}\tc_out={data_to_ram}\tc_in={data_to_cpu}\tmode={mode}\tvalid={valid}\tready={ready}\tstate={cpu_unit.sigdict["state"]}\tinst={cpu_unit.sigdict["inst"]}\txf_state={cpu_unit.sigdict["xf_state"]}\txf={cpu_unit.sigdict["xf"]}\n\tregs={" ".join(hex(i.val)[2:].rjust(4, "0") for i in cpu_unit.symdict["reg"])}')
             clk.next = not clk
             yield delay(1)
 
@@ -404,5 +468,5 @@ if __name__ == '__main__':
     
     if len(sys.argv) > 1:
         for test in sys.argv[1:]:
-            dut = globals()[test](4, 1)
+            dut = globals()[test](16, 1)
             dut.run_sim()
