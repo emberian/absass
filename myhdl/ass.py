@@ -117,12 +117,12 @@ def cpu(addr, data_in, data_out, mode, ready, valid, clk, halt, reset):
         elif state == CPU_STAGE.FETCH:
             if valid:
                 ready.next = False
-                inst.next = data_in[16:0]
+                inst.next[:] = data_in[16:0]
                 state.next = CPU_STAGE.EXEC
             else:
                 pc = reg[0]  # PC
-                addr.next = pc
-                npc.next = pc + 2
+                addr.next[:] = pc
+                npc.next[:] = pc + 2
                 mode.next = False
                 ready.next = True
         elif state == CPU_STAGE.EXEC:
@@ -145,28 +145,28 @@ def cpu(addr, data_in, data_out, mode, ready, valid, clk, halt, reset):
                     elif xf_state == XF_STAGE.FETCH_SRC:
                         sval = reg[sp]
                         if smode == 3:
-                            xf.next = ~intbv(0)[width:]
+                            xf.next[:] = ~intbv(0)[width:]
                             xf_state.next = XF_STAGE.WB_SRC
                         elif sind:
                             if smode == 2:
                                 sval -= width // 8
                             if valid:
                                 ready.next = False
-                                xf.next = data_in
+                                xf.next[:] = data_in
                                 xf_state.next = XF_STAGE.WB_SRC
                             else:
                                 mode.next = False
-                                addr.next = sval
+                                addr.next[:] = sval
                                 ready.next = True
                         else:
-                            xf.next = sval
+                            xf.next[:] = sval
                             xf_state.next = XF_STAGE.WB_SRC
                     elif xf_state == XF_STAGE.WB_SRC:
                         sval = reg[sp]
                         if smode == 1:
-                            reg[sp].next = sval + width // 8
+                            reg[sp].next[:] = sval + width // 8
                         elif smode == 2:
-                            reg[sp].next = sval - width // 8
+                            reg[sp].next[:] = sval - width // 8
                         xf_state.next = XF_STAGE.WRITE_DST
                     elif xf_state == XF_STAGE.WRITE_DST:
                         dval = reg[dl]
@@ -178,20 +178,20 @@ def cpu(addr, data_in, data_out, mode, ready, valid, clk, halt, reset):
                                 xf_state.next = XF_STAGE.WB_DST
                             else:
                                 mode.next = True
-                                addr.next = dval
-                                data_out.next = xf
+                                addr.next[:] = dval
+                                data_out.next[:] = xf
                                 ready.next = True
                         else:
-                            reg[dl].next = xf
+                            reg[dl].next[:] = xf
                             xf_state.next = XF_STAGE.WB_DST
                     elif xf_state == XF_STAGE.WB_DST:
                         dval = reg[dl]
                         if dmode == 3:
-                            reg[dl].next = ~intbv(0)[width:]
+                            reg[dl].next[:] = ~intbv(0)[width:]
                         elif dmode == 2:
-                            reg[dl].next = dval - width / 8
+                            reg[dl].next[:] = dval - width / 8
                         elif dmode == 1:
-                            reg[dl].next = dval + width / 8
+                            reg[dl].next[:] = dval + width / 8
                         xf_state.next = XF_STAGE.WB_PC
                         state.next = CPU_STAGE.FETCH
                         if halt:
@@ -199,7 +199,9 @@ def cpu(addr, data_in, data_out, mode, ready, valid, clk, halt, reset):
                         else:
                             # Don't writeback PC, it could have been a source
                             mode.next = False
-                            addr.next = reg[0]
+                            pc = reg[0]
+                            addr.next[:] = pc
+                            npc.next[:] = pc + 2
                             ready.next = True
                             state.next = CPU_STAGE.FETCH
             else:
@@ -420,6 +422,7 @@ def comp_test(w, tries=10000):
 
 @block
 def cpu_ram(bs, addr, data_in, data_out, mode, ready, valid):
+    bs = bytearray(bs)
     ws = len(addr) // 8
     @always_comb
     def comb():
@@ -447,7 +450,7 @@ def cpu_test(w, _ignored=0):
     cpu_unit = cpu(addr, data_to_cpu, data_to_ram, mode, ready, valid, clk, halt, reset)
     try_convert(cpu_unit)
     mem = cpu_ram(
-            b'\x1b\x22\x1a\x21\x68\x03\xaa\xaa\x82\xfa',
+            open('../assembler/test.bin', 'rb').read(),
             addr, data_to_ram, data_to_cpu, mode, ready, valid,
     )
 
@@ -457,7 +460,7 @@ def cpu_test(w, _ignored=0):
         yield delay(1)
         reset.next = False
         for step in range(48):
-            print(f'{now()}:\t{"tick" if clk else "tock"}\taddr={addr}\tc_out={data_to_ram}\tc_in={data_to_cpu}\tmode={mode}\tvalid={valid}\tready={ready}\tstate={cpu_unit.sigdict["state"]}\tinst={cpu_unit.sigdict["inst"]}\txf_state={cpu_unit.sigdict["xf_state"]}\txf={cpu_unit.sigdict["xf"]}\n\tregs={" ".join(hex(i.val)[2:].rjust(4, "0") for i in cpu_unit.symdict["reg"])}')
+            print(f'{now()}:\t{"tick" if clk else "tock"}\t@{addr}/O={data_to_ram}/I={data_to_cpu}:{"W" if mode else "R"},{"V" if valid else " "}{"R" if ready else " "}\tnpc={cpu_unit.sigdict["npc"]}\tstate={cpu_unit.sigdict["state"]}\tinst={cpu_unit.sigdict["inst"]}\txf={cpu_unit.sigdict["xf"]},{cpu_unit.sigdict["xf_state"]}\n\tregs={" ".join(hex(i.val)[2:].rjust(4, "0") for i in cpu_unit.symdict["reg"])}')
             clk.next = not clk
             yield delay(1)
 
