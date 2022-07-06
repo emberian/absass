@@ -95,7 +95,7 @@ def cpu(addr, data_in, data_out, mode, ready, valid, clk, halt, reset):
     logic = logic_unit(d, s, l_op, l_out)
 
     a_op, a_out = Signal(ARITH.ADD), Signal(modbv(0)[width:])
-    arith = arith_unit(d, s, a_op, a_out)
+    arith = arith_unit(d, s, a_op, a_out, False)
 
     c_eq, c_gt, c_sn, c_iv, c_out = map(Signal, [False] * 5)
     comp = comp_unit(d, s, c_eq, c_gt, c_sn, c_iv, c_out)
@@ -103,7 +103,7 @@ def cpu(addr, data_in, data_out, mode, ready, valid, clk, halt, reset):
     inst = Signal(intbv(0)[16:])
     npc = Signal(intbv(0)[width:])
 
-    reg = [Signal(modbv(0)[width:]) for _ in range(16)]
+    regs = [Signal(modbv(0)[width:]) for _ in range(16)]
     xf = Signal(modbv(0)[width:])
     xf_state = Signal(XF_STAGE.WB_PC)
     
@@ -120,7 +120,7 @@ def cpu(addr, data_in, data_out, mode, ready, valid, clk, halt, reset):
                 inst.next[:] = data_in[16:0]
                 state.next = CPU_STAGE.EXEC
             else:
-                pc = reg[0]  # PC
+                pc = regs[0]  # PC
                 addr.next[:] = pc
                 npc.next[:] = pc + 2
                 mode.next = False
@@ -140,10 +140,10 @@ def cpu(addr, data_in, data_out, mode, ready, valid, clk, halt, reset):
                     if xf_state == XF_STAGE.WB_PC:
                         # This only needs to be done in case src or dst is the
                         # PC, but nonetheless...
-                        reg[0].next = npc
+                        regs[0].next = npc
                         xf_state.next = XF_STAGE.FETCH_SRC
                     elif xf_state == XF_STAGE.FETCH_SRC:
-                        sval = reg[sp]
+                        sval = regs[sp]
                         if smode == 3:
                             xf.next[:] = ~intbv(0)[width:]
                             xf_state.next = XF_STAGE.WB_SRC
@@ -162,14 +162,14 @@ def cpu(addr, data_in, data_out, mode, ready, valid, clk, halt, reset):
                             xf.next[:] = sval
                             xf_state.next = XF_STAGE.WB_SRC
                     elif xf_state == XF_STAGE.WB_SRC:
-                        sval = reg[sp]
+                        sval = regs[sp]
                         if smode == 1:
-                            reg[sp].next[:] = sval + width // 8
+                            regs[sp].next[:] = sval + width // 8
                         elif smode == 2:
-                            reg[sp].next[:] = sval - width // 8
+                            regs[sp].next[:] = sval - width // 8
                         xf_state.next = XF_STAGE.WRITE_DST
                     elif xf_state == XF_STAGE.WRITE_DST:
-                        dval = reg[dl]
+                        dval = regs[dl]
                         if dind:
                             if dmode == 2:
                                 dval -= width // 8
@@ -182,16 +182,16 @@ def cpu(addr, data_in, data_out, mode, ready, valid, clk, halt, reset):
                                 data_out.next[:] = xf
                                 ready.next = True
                         else:
-                            reg[dl].next[:] = xf
+                            regs[dl].next[:] = xf
                             xf_state.next = XF_STAGE.WB_DST
                     elif xf_state == XF_STAGE.WB_DST:
-                        dval = reg[dl]
+                        dval = regs[dl]
                         if dmode == 3:
-                            reg[dl].next[:] = ~intbv(0)[width:]
+                            regs[dl].next[:] = ~intbv(0)[width:]
                         elif dmode == 2:
-                            reg[dl].next[:] = dval - width / 8
+                            regs[dl].next[:] = dval - width / 8
                         elif dmode == 1:
-                            reg[dl].next[:] = dval + width / 8
+                            regs[dl].next[:] = dval + width / 8
                         xf_state.next = XF_STAGE.WB_PC
                         state.next = CPU_STAGE.FETCH
                         if halt:
@@ -199,7 +199,7 @@ def cpu(addr, data_in, data_out, mode, ready, valid, clk, halt, reset):
                         else:
                             # Don't writeback PC, it could have been a source
                             mode.next = False
-                            pc = reg[0]
+                            pc = regs[0]
                             addr.next[:] = pc
                             npc.next[:] = pc + 2
                             ready.next = True
@@ -207,12 +207,12 @@ def cpu(addr, data_in, data_out, mode, ready, valid, clk, halt, reset):
             else:
                 opcode = inst[16:12]
                 if opcode == 0b0001:
-                    d.next = reg[dl]
-                    s.next = reg[sp]
+                    d.next = regs[dl]
+                    s.next = regs[sp]
                     l_op.next = inst[12:8]
                 elif opcode == 0b0010:
-                    d.next = reg[dl]
-                    s.next = reg[sp]
+                    d.next = regs[dl]
+                    s.next = regs[sp]
                     # FIXME: the Verilog synth can't deal with this swizzle
                     #a_op.next = getattr(ARITH, ARITH._names[int(inst[11:8])])
                     a_code = inst[11:8]
@@ -233,8 +233,8 @@ def cpu(addr, data_in, data_out, mode, ready, valid, clk, halt, reset):
                     elif a_code == 7:
                         a_op.next = ARITH.MOD
                 elif opcode == 0b0011:
-                    d.next = reg[dl]
-                    s.next = reg[sp]
+                    d.next = regs[dl]
+                    s.next = regs[sp]
                     c_eq.next = inst[8]
                     c_gt.next = inst[9]
                     c_sn.next = inst[10]
@@ -242,26 +242,26 @@ def cpu(addr, data_in, data_out, mode, ready, valid, clk, halt, reset):
                 elif opcode == 0b1000:
                     offset = inst[8:0]
                     cmp = inst[12:8]
-                    if reg[cmp] != 0:
+                    if regs[cmp] != 0:
                         npc.next = npc.signed() + offset.signed()
                 elif opcode == 0b1001:
-                    reg[dl].next = npc
-                    npc.next = reg[sp]
+                    regs[dl].next = npc
+                    npc.next = regs[sp]
                 state.next = CPU_STAGE.WRITEBACK
         elif state == CPU_STAGE.WRITEBACK:
             dl = inst[4:0]
             if inst[16:14] != 0b01:
                 opcode = inst[16:12]
                 if opcode == 0b0001:
-                    reg[dl].next = l_out
+                    regs[dl].next = l_out
                 elif opcode == 0b0010:
-                    reg[dl].next = a_out
+                    regs[dl].next = a_out
                 elif opcode == 0b0011:
                     if c_out:
-                        reg[dl].next = 1
+                        regs[dl].next = 1
                     else:
-                        reg[dl].next = 0
-            reg[0].next = npc  # PC
+                        regs[dl].next = 0
+            regs[0].next = npc  # PC
             if halt:
                 state.next = CPU_STAGE.IDLE
             else:
@@ -460,7 +460,7 @@ def cpu_test(w, _ignored=0):
         yield delay(1)
         reset.next = False
         for step in range(48):
-            print(f'{now()}:\t{"tick" if clk else "tock"}\t@{addr}/O={data_to_ram}/I={data_to_cpu}:{"W" if mode else "R"},{"V" if valid else " "}{"R" if ready else " "}\tnpc={cpu_unit.sigdict["npc"]}\tstate={cpu_unit.sigdict["state"]}\tinst={cpu_unit.sigdict["inst"]}\txf={cpu_unit.sigdict["xf"]},{cpu_unit.sigdict["xf_state"]}\n\tregs={" ".join(hex(i.val)[2:].rjust(4, "0") for i in cpu_unit.symdict["reg"])}')
+            print(f'{now()}:\t{"tick" if clk else "tock"}\t@{addr}/O={data_to_ram}/I={data_to_cpu}:{"W" if mode else "R"},{"V" if valid else " "}{"R" if ready else " "}\tnpc={cpu_unit.sigdict["npc"]}\tstate={cpu_unit.sigdict["state"]}\tinst={cpu_unit.sigdict["inst"]}\txf={cpu_unit.sigdict["xf"]},{cpu_unit.sigdict["xf_state"]}\n\tregs={" ".join(hex(i.val)[2:].rjust(4, "0") for i in cpu_unit.symdict["regs"])}')
             clk.next = not clk
             yield delay(1)
 
