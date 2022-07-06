@@ -84,7 +84,7 @@ def mem_xlate_rd():
     pass
 
 @block
-def cpu(addr, data_in, data_out, mode, ready, valid, clk, halt, reset):
+def cpu(addr, data_in, data_out, mode, ready, valid, clk, halt, reset, addr_skip = 2):
     width = len(addr)
 
     state = Signal(CPU_STAGE.IDLE)
@@ -102,6 +102,7 @@ def cpu(addr, data_in, data_out, mode, ready, valid, clk, halt, reset):
 
     inst = Signal(intbv(0)[16:])
     npc = Signal(intbv(0)[width:])
+    bits_valid = Signal(intbv(0, min=0, max=17))
 
     regs = [Signal(modbv(0)[width:]) for _ in range(16)]
     xf = Signal(modbv(0)[width:])
@@ -114,15 +115,27 @@ def cpu(addr, data_in, data_out, mode, ready, valid, clk, halt, reset):
         if state == CPU_STAGE.IDLE:
             if not halt:
                 state.next = CPU_STAGE.FETCH
+                bits_valid.next[:] = 0
         elif state == CPU_STAGE.FETCH:
             if valid:
                 ready.next = False
-                inst.next[:] = data_in[16:0]
-                state.next = CPU_STAGE.EXEC
+                if width >= 16:
+                    inst.next[:] = data_in[16:0]
+                    state.next = CPU_STAGE.EXEC
+                else:
+                    access_width = width
+                    if bits_valid + access_width > 16:
+                        access_width = 16 - bits_valid
+                    inst.next[16 - bits_valid:16 - bits_valid - access_width] = data_in[access_width:]
+                    if bits_valid + access_width >= 16:
+                        state.next = CPU_STAGE.EXEC
+                    else:
+                        regs[0].next[:] = regs[0] + 1
+                        bits_valid.next[:] = bits_valid + access_width
             else:
                 pc = regs[0]  # PC
                 addr.next[:] = pc
-                npc.next[:] = pc + 2
+                npc.next[:] = pc + addr_skip
                 mode.next = False
                 ready.next = True
         elif state == CPU_STAGE.EXEC:
@@ -194,6 +207,7 @@ def cpu(addr, data_in, data_out, mode, ready, valid, clk, halt, reset):
                             regs[dl].next[:] = dval + width / 8
                         xf_state.next = XF_STAGE.WB_PC
                         state.next = CPU_STAGE.FETCH
+                        bits_valid.next[:] = 0
                         if halt:
                             state.next = CPU_STAGE.IDLE
                         else:
@@ -201,9 +215,8 @@ def cpu(addr, data_in, data_out, mode, ready, valid, clk, halt, reset):
                             mode.next = False
                             pc = regs[0]
                             addr.next[:] = pc
-                            npc.next[:] = pc + 2
+                            npc.next[:] = pc + addr_skip
                             ready.next = True
-                            state.next = CPU_STAGE.FETCH
             else:
                 opcode = inst[16:12]
                 if opcode == 0b0001:
@@ -267,10 +280,11 @@ def cpu(addr, data_in, data_out, mode, ready, valid, clk, halt, reset):
             else:
                 pc = npc
                 addr.next = pc
-                npc.next = pc + 2
+                npc.next = pc + addr_skip
                 mode.next = False
                 ready.next = True
                 state.next = CPU_STAGE.FETCH
+                bits_valid.next[:] = 0
 
     return logic, arith, comp, tick
 
@@ -420,16 +434,93 @@ def comp_test(w, tries=10000):
 
     return unit, temporal
 
+class bitarray:
+    def __init__(self, bs):
+        self.bs = bytearray(bs)
+
+    @staticmethod
+    def to_index(n):
+        return divmod(n, 8)
+
+    def __repr__(self):
+        return f'bitarray({self.bs!r})'
+
+    def __getitem__(self, v):
+        try:
+            addr = int(v)
+        except TypeError:
+            pass
+        else:
+            bt, bi = self.to_index(addr)
+            return (self.bs[bt] >> (7 - bi)) & 1
+        if isinstance(v, slice):
+            # XXX unsatisfying, but exceedingly difficult to do correctly.
+            res = 0
+            for bidx in range(v.start, v.stop, v.step if v.step is not None else 1):
+                res = (res << 1) | self[bidx]
+            return res
+        #    if v.step is not None:
+        #        raise NotImplementedError('bitstring stride')
+        #    start_bt, start_bi = self.to_index(v.start)
+        #    stop_bt, stop_bi = self.to_index(v.stop)
+        #    print(f'get {v.start}:{v.stop} = bytes {start_bt},{start_bi}:{stop_bt},{stop_bi}')
+        #    bitwidth = v.stop - v.start
+        #    range_bt = stop_bt if stop_bi == 0 else stop_bt + 1
+        #    bts = int.from_bytes(self.bs[start_bt:range_bt], 'big')
+        #    if start_bi > 0:
+        #        bts >>= start_bi
+        #    bts &= (1 << bitwidth) - 1
+        #    return bts
+        raise NotImplementedError(type(v))
+
+    def __setitem__(self, v, val):
+        try:
+            addr = int(v)
+        except TypeError:
+            pass
+        else:
+            bt, bi = self.to_index(addr)
+            if val & 1:
+                self.bs[bt] |= (1 << (7 - bi))
+            else:
+                self.bs[bt] &= ~(1 << (7 - bi))
+            return val
+        if isinstance(v, slice):
+            # XXX idem
+            width = v.stop - v.start
+            for bidx in range(v.start, v.stop, v.step if v.step is not None else 1):
+                self[bidx] = (val >> (width - bidx + v.start - 1)) & 1
+            return val
+        #    if v.step is not None:
+        #        raise NotImplementedError('bitstring stride')
+        #    start_bt, start_bi = self.to_index(v.start)
+        #    stop_bt, stop_bi = self.to_index(v.stop)
+        #    bitwidth = v.stop - v.start
+        #    bytewidth = (bitwidth + 7 // 8)
+        #    val_bits = val
+        #    if start_bi > 0:
+        #        val_bits <<= start_bi
+        #        val_bits |= self.bs[start_bt] & ((1 << start_bi) - 1)
+        #    range_bt = stop_bt if stop_bi == 0 else stop_bt + 1
+        #    if stop_bi > 0:
+        #        val_bits |= (self.bs[range_bt] & ~((1 << stop_bi) - 1)) << v.stop
+        #    bts = val_bits.to_bytes(bytewidth, 'big')
+        #    self.bs[start_bt:range_bt] = bts
+        #    return val
+        raise NotImplementedError(type(v))
+
 @block
-def cpu_ram(bs, addr, data_in, data_out, mode, ready, valid):
-    bs = bytearray(bs)
-    ws = len(addr) // 8
+def cpu_ram(bs, addr, data_in, data_out, mode, ready, valid, addr_gran = 8):
+    bs = bitarray(bytearray(bs))
+    bitsize = len(addr)
+    upper_ws = (bitsize + 7) // 8
     @always_comb
     def comb():
         if ready:
+            bitaddr = addr * addr_gran
             if mode:
-                bs[addr:addr+ws] = int(data_in).to_bytes(ws, 'big')
-            data_out.next[:] = int.from_bytes(bs[addr:addr+ws], 'big')
+                bs[bitaddr:bitaddr + bitsize] = int(data_in)
+            data_out.next[bitsize:] = bs[bitaddr:bitaddr + bitsize]
             valid.next = True
         else:
             valid.next = False
@@ -447,11 +538,12 @@ def cpu_test(w, _ignored=0):
     halt = Signal(False)
     reset = ResetSignal(True, active=True, isasync=True)
 
-    cpu_unit = cpu(addr, data_to_cpu, data_to_ram, mode, ready, valid, clk, halt, reset)
+    cpu_unit = cpu(addr, data_to_cpu, data_to_ram, mode, ready, valid, clk, halt, reset, 1)
     try_convert(cpu_unit)
     mem = cpu_ram(
             open('../assembler/test.bin', 'rb').read(),
             addr, data_to_ram, data_to_cpu, mode, ready, valid,
+            min((8, w))
     )
 
     @instance
@@ -460,7 +552,7 @@ def cpu_test(w, _ignored=0):
         yield delay(1)
         reset.next = False
         for step in range(48):
-            print(f'{now()}:\t{"tick" if clk else "tock"}\t@{addr}/O={data_to_ram}/I={data_to_cpu}:{"W" if mode else "R"},{"V" if valid else " "}{"R" if ready else " "}\tnpc={cpu_unit.sigdict["npc"]}\tstate={cpu_unit.sigdict["state"]}\tinst={cpu_unit.sigdict["inst"]}\txf={cpu_unit.sigdict["xf"]},{cpu_unit.sigdict["xf_state"]}\n\tregs={" ".join(hex(i.val)[2:].rjust(4, "0") for i in cpu_unit.symdict["regs"])}')
+            print(f'{now()}:\t{"tick" if clk else "tock"}\t@{addr}/O={data_to_ram}/I={data_to_cpu}:{"W" if mode else "R"},{"V" if valid else " "}{"R" if ready else " "}\tnpc={cpu_unit.sigdict["npc"]}\tstate={cpu_unit.sigdict["state"]}\tinst={cpu_unit.sigdict["inst"]}/{cpu_unit.sigdict["bits_valid"]}\txf={cpu_unit.sigdict["xf"]},{cpu_unit.sigdict["xf_state"]}\n\tregs={" ".join(hex(i.val)[2:].rjust(4, "0") for i in cpu_unit.symdict["regs"])}')
             clk.next = not clk
             yield delay(1)
 
@@ -471,5 +563,5 @@ if __name__ == '__main__':
     
     if len(sys.argv) > 1:
         for test in sys.argv[1:]:
-            dut = globals()[test](16, 1)
+            dut = globals()[test](4, 1)
             dut.run_sim()
