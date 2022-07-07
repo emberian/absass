@@ -563,5 +563,5 @@ if __name__ == '__main__':
     
     if len(sys.argv) > 1:
         for test in sys.argv[1:]:
-            dut = globals()[test](4, 1)
+            dut = globals()[test](8, 1)
             dut.run_sim()
