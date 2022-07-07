@@ -44,7 +44,7 @@ object ArithOps extends SpinalEnum {
     newElement()
 
 }
-class ArithUnit(val ws: Int) extends Module {
+class ArithUnit(val ws: Int, val fancy: Bool) extends Module {
   val io = new Bundle {
     val d = in UInt (ws bits)
     val s = in UInt (ws bits)
@@ -63,14 +63,16 @@ class ArithUnit(val ws: Int) extends Module {
       when(io.s < ws) { io.res := io.d >> io.s }
         .otherwise { io.res.setAllTo(io.d(ws - 1)) }
     }
-    is(ArithOps.l_mul) { io.res := (io.d * io.s).resize(ws bits) }
+    is(ArithOps.l_mul) {
+      if (fancy) { io.res := (io.d * io.s).resize(ws bits) }
+    }
     is(ArithOps.l_div) {
-      when(io.s =/= 0) { io.res := io.d / io.s }.otherwise {
+      when(io.s =/= 0) { if (fancy) { io.res := io.d / io.s } }.otherwise {
         io.res.setAll()
       }
     }
     is(ArithOps.l_mod) {
-      when(io.s =/= 0) { io.res := io.d % io.s }.otherwise { io.res := 0 }
+      when(io.s =/= 0) { if (fancy) { io.res := io.d % io.s } }.otherwise { io.res := 0 }
     }
   }
 }
@@ -97,7 +99,7 @@ object Stages extends SpinalEnum {
   val s_idle, s_fetch, s_execute, s_writeback = newElement()
 }
 
-class CPU(val ws: Int) extends Module {
+class CPU(val ws: Int, val fancy: Bool) extends Module {
   val Word = UInt(ws bits)
   val Insn = UInt(16 bits)
   val io = new Bundle {
@@ -121,7 +123,7 @@ class CPU(val ws: Int) extends Module {
 
   val state = RegInit(Stages.s_idle)
 
-  val arith = new ArithUnit(ws)
+  val arith = new ArithUnit(ws, fancy)
   val logic = new LogicUnit(ws)
   val compare = new ComparisonUnit(ws)
 
@@ -342,17 +344,16 @@ class CPU(val ws: Int) extends Module {
   }
 }
 
-//Generate the MyTopLevel's Verilog
-object MyTopLevelVerilog {
+object Icestick {
   def main(args: Array[String]) {
-    SpinalVerilog(new CPU(16))
+    SpinalVerilog(new CPU(4, false))
   }
 }
 
 //Generate the MyTopLevel's VHDL
 object MyTopLevelVhdl {
   def main(args: Array[String]) {
-    SpinalVhdl(new CPU(16))
+    SpinalVhdl(new CPU(16, true))
   }
 }
 
@@ -365,6 +366,6 @@ object MySpinalConfig
 //Generate the MyTopLevel's Verilog using the above custom configuration.
 object MyTopLevelVerilogWithCustomConfig {
   def main(args: Array[String]) {
-    MySpinalConfig.generateVerilog(new CPU(4))
+    MySpinalConfig.generateVerilog(new CPU(4, false))
   }
 }
