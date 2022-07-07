@@ -12,6 +12,8 @@ from myhdl import block, always_comb, always_seq, always, \
 SUBDIR = 'verilog'
 os.makedirs(SUBDIR, exist_ok = True)
 
+STEPPING = 0
+
 @block
 def logic_unit(p, q, op, out):
     assert len(p) == len(q) == len(out)
@@ -76,7 +78,7 @@ def comp_unit(d, s, eq, gt, sn, iv, out):
 
     return comb
 
-CPU_STAGE = enum('IDLE', 'FETCH', 'EXEC', 'WRITEBACK')
+CPU_STAGE = enum('IDLE', 'FETCH', 'EXEC', 'WRITEBACK', 'HALT')
 XF_STAGE = enum('WB_PC', 'FETCH_SRC', 'WB_SRC', 'WRITE_DST', 'WB_DST')
 
 @block
@@ -107,6 +109,8 @@ def cpu(addr, data_in, data_out, mode, ready, valid, clk, halt, reset, addr_skip
     regs = [Signal(modbv(0)[width:]) for _ in range(16)]
     xf = Signal(modbv(0)[width:])
     xf_state = Signal(XF_STAGE.WB_PC)
+
+    ivt = Signal(intbv(0)[width:])  # Unused as of yet
     
     @always_seq(clk.posedge, reset=reset)
     def tick():
@@ -251,6 +255,27 @@ def cpu(addr, data_in, data_out, mode, ready, valid, clk, halt, reset, addr_skip
                 elif opcode == 0b1001:
                     regs[dl].next = npc
                     npc.next = regs[sp]
+                elif opcode == 0b1010 or opcode == 0b1011:  # Don't rewrite this to in for Verilog's sake
+                    write = inst[12]
+                    r = inst[12:8]
+                    sr = inst[8:0]
+                    if sr == 0:
+                        if not write:
+                            regs[r].next = STEPPING
+                    elif sr == 1:
+                        if not write:
+                            regs[r].next = width
+                    elif sr == 2:
+                        if write:
+                            ivt.next = regs[r]
+                        else:
+                            regs[r].next = ivt
+                    elif sr == 3:
+                        if write:
+                            v = regs[r]
+                            if v & 0x1:
+                                state.next = CPU_STAGE.HALT
+                                return
                 state.next = CPU_STAGE.WRITEBACK
         elif state == CPU_STAGE.WRITEBACK:
             dl = inst[4:0]
@@ -529,7 +554,7 @@ def cpu_test(w, _ignored=0):
     halt = Signal(False)
     reset = ResetSignal(True, active=True, isasync=True)
 
-    cpu_unit = cpu(addr, data_to_cpu, data_to_ram, mode, ready, valid, clk, halt, reset, 1)
+    cpu_unit = cpu(addr, data_to_cpu, data_to_ram, mode, ready, valid, clk, halt, reset, 2)
     try_convert(cpu_unit)
     mem = cpu_ram(
             open('../assembler/test.bin', 'rb').read(),
@@ -554,5 +579,5 @@ if __name__ == '__main__':
     
     if len(sys.argv) > 1:
         for test in sys.argv[1:]:
-            dut = globals()[test](8, 1)
+            dut = globals()[test](16, 1)
             dut.run_sim()

@@ -1,11 +1,13 @@
 use std::io::{BufRead, Read};
 
+const STEPPING: usize = 0;
+
 #[derive(Debug, Hash, Clone, Copy)]
 pub enum MoveMode {
     Direct,
     Incr,
     Decr,
-    Resv,
+    DecrPost,
 }
 impl MoveMode {
     pub fn from_u8(val: u8) -> MoveMode {
@@ -13,7 +15,7 @@ impl MoveMode {
             0 => MoveMode::Direct,
             1 => MoveMode::Incr,
             2 => MoveMode::Decr,
-            3 => MoveMode::Resv,
+            3 => MoveMode::DecrPost,
             _ => panic!("Invalid MoveMode value: {}", val),
         }
     }
@@ -76,6 +78,14 @@ pub enum Insn {
         d_mode: MoveMode,
         d_deref: bool,
     },
+    SysReg {
+        write: bool,
+        reg: Reg,
+        sr: u8,
+    },
+    NotSure {
+        value: u16,
+    },
 }
 
 impl Insn {
@@ -118,6 +128,21 @@ impl Insn {
                     | ((*d_deref as u16) << 10)
                     | ((*d_mode as u16) << 8)
                     | (0x4 << 12)
+            }
+            Insn::SysReg {
+                write,
+                reg,
+                sr,
+            } => {
+                (0xau16 << 12)
+                    | ((*write as u16) << 12)
+                    | ((*reg as u16) << 8)
+                    | (*sr as u16)
+            }
+            Insn::NotSure {
+                value,
+            } => {
+                *value
             }
         }
     }
@@ -176,7 +201,17 @@ impl Insn {
                     d_deref: d_deref != 0,
                 }
             }
-            _ => panic!("invalid insn"),
+            0xa000..=0xb000 => {
+                let write = (val & 0x1000) >> 12;
+                let reg = (val & 0xf00) >> 8;
+                let sr = val & 0xff;
+                Insn::SysReg {
+                    write: write != 0,
+                    reg: reg as Reg,
+                    sr: sr as u8,
+                }
+            }
+            x => Insn::NotSure { value: x },
         }
     }
 }
@@ -184,11 +219,23 @@ impl Insn {
 struct Machine {
     regs: [Word; 16],
     memory: Vec<u8>,
-    pc: usize,
+    ivt: Reg,
 }
+
+#[derive(Debug, Hash, Clone, Copy)]
+pub enum StepOut {
+    Continue,
+    Halt,
+}
+
 impl Machine {
-    fn step(&mut self, i: Insn) {
-        let pc = self.pc + 2;
+    fn pc(&self) -> usize { self.regs[0] as usize }
+
+    fn step(&mut self, i: Insn) -> StepOut {
+        use StepOut::*;
+        println!("exec {:?}", i);
+
+        let pc = self.pc() + 2;
         match i {
             Insn::Logic { src, dst, op } => {
                 let mut res: Word = 0;
@@ -233,14 +280,12 @@ impl Machine {
                 d_mode,
                 d_deref,
             } => {
-                self.regs[0] = self.pc as Word;
+                self.regs[0] = pc as Word;
                 let s = self.regs[src];
                 let d = self.regs[dst];
                 let s_val = if let MoveMode::Decr = s_mode {
                     self.regs[src] = s.wrapping_sub(WORDSZ);
                     s.wrapping_sub(WORDSZ)
-                } else if let MoveMode::Resv = s_mode {
-                    !0
                 } else {
                     s
                 };
@@ -248,8 +293,6 @@ impl Machine {
                     self.regs[dst] = d.wrapping_sub(WORDSZ);
 
                     d.wrapping_sub(WORDSZ)
-                } else if let MoveMode::Resv = d_mode {
-                    !0
                 } else {
                     d
                 };
@@ -269,25 +312,53 @@ impl Machine {
                 } else {
                     self.regs[dst] = s;
                 }
-                if let MoveMode::Incr = s_mode {
-                    self.regs[src] = self.regs[src].wrapping_add(WORDSZ);
+                match s_mode {
+                    MoveMode::Incr => { self.regs[src] = self.regs[src].wrapping_add(WORDSZ); }
+                    MoveMode::DecrPost => { self.regs[src] = self.regs[src].wrapping_sub(WORDSZ); }
+                    _ => ()
                 }
-                if let MoveMode::Incr = d_mode {
-                    self.regs[dst] = self.regs[dst].wrapping_add(WORDSZ);
+                match d_mode {
+                    MoveMode::Incr => { self.regs[dst] = self.regs[dst].wrapping_add(WORDSZ); }
+                    MoveMode::DecrPost => { self.regs[dst] = self.regs[dst].wrapping_sub(WORDSZ); }
+                    _ => ()
                 }
 
-                return;
+                return Continue;
+            }
+            Insn::SysReg {
+                write,
+                reg,
+                sr
+            } => {
+                match sr {
+                    0 => if !write { self.regs[reg] = STEPPING as Word; }
+                    1 => if !write { self.regs[reg] = std::mem::size_of::<usize>() as Word * 8; }
+                    2 => if write {
+                        self.ivt = self.regs[reg] as Reg;
+                    } else {
+                        self.regs[reg] = self.ivt as Word;
+                    }
+                    3 => { return Halt; }
+                    _ => ()
+                }
+            }
+            Insn::NotSure {
+                value,
+            } => {
+                panic!("tried to execute unknown instruction {:?}", value);
             }
         }
 
         self.regs[0] = pc as Word;
+        Continue
     }
 
     pub fn run(&mut self) {
-        while self.pc < self.memory.len() {
+        while self.pc() < self.memory.len() {
+            println!("pc {:?}", self.pc());
             let i =
-                Insn::decode((self.memory[self.pc] as u16) << 8 | self.memory[self.pc + 1] as u16);
-            self.step(i);
+                Insn::decode((self.memory[self.pc()] as u16) << 8 | self.memory[self.pc() + 1] as u16);
+            if let StepOut::Halt = self.step(i) { break; }
         }
     }
 }
@@ -298,7 +369,7 @@ fn main() {
             let mut m = Machine {
                 regs: [0; 16],
                 memory: vec![0; 0x10000],
-                pc: 0,
+                ivt: 0,
             };
             m.step(Insn::Logic {
                 src: 1,
@@ -317,7 +388,21 @@ fn main() {
                 d_deref: true,
             });
             assert_eq!(m.memory[0x8 as usize], 0xff);
-        }
+        },
+        Some("run") => {
+            let mut m = Machine {
+                regs: [0; 16],
+                memory: Vec::new(),
+                ivt: 0,
+            };
+            if let Some(filename) = std::env::args().nth(2) {
+                let mut rdr = std::fs::File::open(filename).expect("opening program file");
+                rdr.read_to_end(&mut m.memory);
+            } else {
+                std::io::stdin().read_to_end(&mut m.memory);
+            }
+            m.run();
+        },
         Some("disasm") => {
             let mut insn_buf = [0u8; 2];
             let mut i = std::io::stdin().lock();
@@ -327,7 +412,7 @@ fn main() {
                     Insn::decode((insn_buf[0] as u16) << 8 | insn_buf[1] as u16)
                 );
             }
-        }
+        },
         Some("dishex") => {
             for l in std::io::stdin().lock().lines() {
                 let l = l.unwrap();
@@ -336,7 +421,7 @@ fn main() {
                 let iv = Insn::decode(u16::from_str_radix(l, 16).unwrap());
                 println!("{:?}", iv);
             }
-        }
+        },
 
         Some(_) => eprintln!("no such command!"),
         None => eprintln!("no command given!"),

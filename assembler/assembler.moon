@@ -80,6 +80,7 @@ class Assembler
 		XFER: 0x4000
 		COND: 0x8000
 		JAL: 0x9000
+		SR: 0xa000
 
 
 	e_logic: (data) =>
@@ -100,6 +101,19 @@ class Assembler
 			((s_mode & 0x3) << 11) |
 			(s_ind << 13)
 		)
+
+	e_sr: (data) =>
+		{:mode, :reg, :sr} = data
+		write = switch mode
+			when "read" then 0
+			when "write" then 1
+			else error "Bad mode " .. mode
+		@emit_byte (
+			@@OPCODE.SR |
+			(write << 12) |
+			(reg << 8)
+		) >> 8
+		@emit_maybe_byte sr
 
 	p_num: (s) =>
 		s = @trim s
@@ -288,6 +302,28 @@ class Assembler
 				dst: dst.val
 		}, op.rest
 
+	DECL_INSN "SR", (s) =>
+		s = @trim s
+		local mode
+		switch s\sub 1, 1
+			when "R" then mode = "read"
+			when "W" then mode = "write"
+			else return @die "Bad mode " .. s\sub(1, 1) .. " (expected R/W)", s
+		s = @trim @optcomma s\sub 2
+		reg = @p_reg s
+		return @die "Expected reg", s unless reg
+		s = @trim @optcomma reg.rest
+		sr = @p_num s
+		return @die "Expected SR number", s unless sr
+		s = sr.rest
+		@ok {
+			insn: "sr"
+			data:
+				:mode
+				reg: reg.val
+				sr: sr.val
+		}, s
+
 	@EMITTERS: {}
 	DECL_EMIT = (ins, emit) -> @EMITTERS[ins] = {
 		:emit
@@ -313,6 +349,8 @@ class Assembler
 			emit val
 
 	DECL_EMIT "word", (ins) => @emit_maybe_word ins.data
+
+	DECL_EMIT "sr", (ins) => @e_sr ins.data
 
 	DECL_EMIT "seq", (ins) =>
 		for insn in *ins.data
