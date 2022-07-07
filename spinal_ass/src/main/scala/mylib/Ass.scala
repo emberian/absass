@@ -44,7 +44,7 @@ object ArithOps extends SpinalEnum {
     newElement()
 
 }
-class ArithUnit(val ws: Int) extends Module {
+class ArithUnit(val ws: Int, val fancy: Boolean) extends Module {
   val io = new Bundle {
     val d = in UInt (ws bits)
     val s = in UInt (ws bits)
@@ -63,14 +63,18 @@ class ArithUnit(val ws: Int) extends Module {
       when(io.s < ws) { io.res := io.d >> io.s }
         .otherwise { io.res.setAllTo(io.d(ws - 1)) }
     }
-    is(ArithOps.l_mul) { io.res := (io.d * io.s).resize(ws bits) }
+    is(ArithOps.l_mul) {
+      if (fancy) { io.res := (io.d * io.s).resize(ws bits) }
+    }
     is(ArithOps.l_div) {
-      when(io.s =/= 0) { io.res := io.d / io.s }.otherwise {
+      when(io.s =/= 0) { if (fancy) { io.res := io.d / io.s } }.otherwise {
         io.res.setAll()
       }
     }
     is(ArithOps.l_mod) {
-      when(io.s =/= 0) { io.res := io.d % io.s }.otherwise { io.res := 0 }
+      when(io.s =/= 0) { if (fancy) { io.res := io.d % io.s } }.otherwise {
+        io.res := 0
+      }
     }
   }
 }
@@ -97,7 +101,7 @@ object Stages extends SpinalEnum {
   val s_idle, s_fetch, s_execute, s_writeback = newElement()
 }
 
-class CPU(val ws: Int) extends Module {
+class CPU(val ws: Int, val fancy: Boolean) extends Module {
   val Word = UInt(ws bits)
   val Insn = UInt(16 bits)
   val io = new Bundle {
@@ -121,7 +125,7 @@ class CPU(val ws: Int) extends Module {
 
   val state = RegInit(Stages.s_idle)
 
-  val arith = new ArithUnit(ws)
+  val arith = new ArithUnit(ws, fancy)
   val logic = new LogicUnit(ws)
   val compare = new ComparisonUnit(ws)
 
@@ -230,7 +234,10 @@ class CPU(val ws: Int) extends Module {
           io.read_port.ready := True
           io.mem_is_write := False
           when(io.read_port.valid) {
-            when(smode === 1) { regs(sp) := regs(sp) + (ws / 8) }
+            switch(smode) {
+              is(1) { regs(sp) := regs(sp) + (ws / 8) }
+              is(3) { regs(sp) := regs(sp) - (ws / 8) }
+            }
             scont := io.read_port.payload
             sready := True
           }
@@ -238,7 +245,7 @@ class CPU(val ws: Int) extends Module {
           switch(smode) {
             is(2) { scont := regs(sp) - (ws / 8) }
             is(0) { scont := regs(sp) }
-            is(3) { scont.setAll() }
+            is(3) { scont := regs(sp); regs(sp) := regs(sp) - (ws / 8) }
             is(1) { scont := regs(sp); regs(sp) := regs(sp) + (ws / 8) }
           }
           sready := True
@@ -257,7 +264,11 @@ class CPU(val ws: Int) extends Module {
             io.mem_is_write := True
             io.write_port.payload := scont
             when(io.write_port.ready) {
-              when(dmode === 1) { regs(dl) := regs(dl) + (ws / 8) }
+              switch(dmode) {
+                is(1) { regs(dl) := regs(dl) + (ws / 8) }
+                is(3) { regs(dl) := regs(dl) - (ws / 8) }
+              }
+
               dready := True
             }
           }.otherwise {
@@ -265,7 +276,7 @@ class CPU(val ws: Int) extends Module {
               is(0) { regs(dl) := scont }
               is(1) { regs(dl) := scont + (ws / 8) }
               is(2) { regs(dl) := scont - (ws / 8) }
-              is(3) { regs(dl).setAll() }
+              is(3) { regs(dl) := scont - (ws / 8) }
             }
             dready := True
           }
@@ -342,17 +353,16 @@ class CPU(val ws: Int) extends Module {
   }
 }
 
-//Generate the MyTopLevel's Verilog
-object MyTopLevelVerilog {
+object Icestick {
   def main(args: Array[String]) {
-    SpinalVerilog(new CPU(16))
+    SpinalVerilog(new CPU(4, false))
   }
 }
 
 //Generate the MyTopLevel's VHDL
 object MyTopLevelVhdl {
   def main(args: Array[String]) {
-    SpinalVhdl(new CPU(16))
+    SpinalVhdl(new CPU(16, true))
   }
 }
 
@@ -365,6 +375,6 @@ object MySpinalConfig
 //Generate the MyTopLevel's Verilog using the above custom configuration.
 object MyTopLevelVerilogWithCustomConfig {
   def main(args: Array[String]) {
-    MySpinalConfig.generateVerilog(new CPU(4))
+    MySpinalConfig.generateVerilog(new CPU(4, false))
   }
 }

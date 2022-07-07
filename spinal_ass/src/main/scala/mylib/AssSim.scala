@@ -53,7 +53,7 @@ object LogicSim {
 
 object ArithSim {
   def main(args: Array[String]) {
-    SimConfig.withWave.doSim(new ArithUnit(16)) { arith =>
+    SimConfig.withWave.doSim(new ArithUnit(16, true)) { arith =>
       def fix(x: Int): Int = {
         if (x >= 32768) { x - 65536 }
         else { x }
@@ -233,7 +233,7 @@ object ComparisonSim {
 
 object CPUSim {
   def main(args: Array[String]) {
-    SimConfig.withWave.doSim(new CPU(4)) { cpu =>
+    SimConfig.withWave.doSim(new CPU(4, true)) { cpu =>
       def exec_insn(c: CPU, i: Int) = {
         assert(c.io.insn_content.ready == 1)
         c.io.insn_content.payload #= i
@@ -258,7 +258,6 @@ object CPUSim {
       exec_insn(cpu, 0x1a23)
       assert(cpu.regs(3) == 0xf)
 
-      exec_insn(cpu, 0x4)
     }
   }
 }
