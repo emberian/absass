@@ -44,7 +44,7 @@ object ArithOps extends SpinalEnum {
     newElement()
 
 }
-class ArithUnit(val ws: Int, val fancy: Bool) extends Module {
+class ArithUnit(val ws: Int, val fancy: Boolean) extends Module {
   val io = new Bundle {
     val d = in UInt (ws bits)
     val s = in UInt (ws bits)
@@ -101,7 +101,7 @@ object Stages extends SpinalEnum {
   val s_idle, s_fetch, s_execute, s_writeback = newElement()
 }
 
-class CPU(val ws: Int, val fancy: Bool) extends Module {
+class CPU(val ws: Int, val fancy: Boolean) extends Module {
   val Word = UInt(ws bits)
   val Insn = UInt(16 bits)
   val io = new Bundle {
@@ -234,9 +234,10 @@ class CPU(val ws: Int, val fancy: Bool) extends Module {
           io.read_port.ready := True
           io.mem_is_write := False
           when(io.read_port.valid) {
-            when(smode === 1) {
-              regs(sp) := regs(sp) + (ws / 8)
-            }.otherwise when (smode === 3) { regs(sp) := regs(sp) - (ws / 8) }
+            switch(smode) {
+              is(1) { regs(sp) := regs(sp) + (ws / 8) }
+              is(3) { regs(sp) := regs(sp) - (ws / 8) }
+            }
             scont := io.read_port.payload
             sready := True
           }
@@ -263,9 +264,11 @@ class CPU(val ws: Int, val fancy: Bool) extends Module {
             io.mem_is_write := True
             io.write_port.payload := scont
             when(io.write_port.ready) {
-              when(dmode === 1) {
-                regs(dl) := regs(dl) + (ws / 8)
-              }.otherwise when (dmode == 3) { regs(dl) := regs(dl) - (ws / 8) }
+              switch(dmode) {
+                is(1) { regs(dl) := regs(dl) + (ws / 8) }
+                is(3) { regs(dl) := regs(dl) - (ws / 8) }
+              }
+
               dready := True
             }
           }.otherwise {
