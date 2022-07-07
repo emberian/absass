@@ -49,7 +49,7 @@ The _increment mode_ is a two bit value interpreted as:
     - 0b00 - no change is made to the registers
     - 0b01 - autoincrement: increment the value of the register by $WORDBYTES after the memory operation
     - 0b10 - autodecrement: decrement the value of the register by $WORDBYTES before the operation
-    - 0b11 - the register is ignored, and instead all ones are used for the value.
+    - 0b11 - autopostdecrement: decrement the value of the register by $WORDBYTES after the memory operation
 
 
 - I[15:12] == 0b0011	( COMPARISON INSTRUCTIONS )

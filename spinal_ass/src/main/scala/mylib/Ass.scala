@@ -72,7 +72,9 @@ class ArithUnit(val ws: Int, val fancy: Bool) extends Module {
       }
     }
     is(ArithOps.l_mod) {
-      when(io.s =/= 0) { if (fancy) { io.res := io.d % io.s } }.otherwise { io.res := 0 }
+      when(io.s =/= 0) { if (fancy) { io.res := io.d % io.s } }.otherwise {
+        io.res := 0
+      }
     }
   }
 }
@@ -232,7 +234,9 @@ class CPU(val ws: Int, val fancy: Bool) extends Module {
           io.read_port.ready := True
           io.mem_is_write := False
           when(io.read_port.valid) {
-            when(smode === 1) { regs(sp) := regs(sp) + (ws / 8) }
+            when(smode === 1) {
+              regs(sp) := regs(sp) + (ws / 8)
+            }.otherwise when (smode === 3) { regs(sp) := regs(sp) - (ws / 8) }
             scont := io.read_port.payload
             sready := True
           }
@@ -240,7 +244,7 @@ class CPU(val ws: Int, val fancy: Bool) extends Module {
           switch(smode) {
             is(2) { scont := regs(sp) - (ws / 8) }
             is(0) { scont := regs(sp) }
-            is(3) { scont.setAll() }
+            is(3) { scont := regs(sp); regs(sp) := regs(sp) - (ws / 8) }
             is(1) { scont := regs(sp); regs(sp) := regs(sp) + (ws / 8) }
           }
           sready := True
@@ -259,7 +263,9 @@ class CPU(val ws: Int, val fancy: Bool) extends Module {
             io.mem_is_write := True
             io.write_port.payload := scont
             when(io.write_port.ready) {
-              when(dmode === 1) { regs(dl) := regs(dl) + (ws / 8) }
+              when(dmode === 1) {
+                regs(dl) := regs(dl) + (ws / 8)
+              }.otherwise when (dmode == 3) { regs(dl) := regs(dl) - (ws / 8) }
               dready := True
             }
           }.otherwise {
@@ -267,7 +273,7 @@ class CPU(val ws: Int, val fancy: Bool) extends Module {
               is(0) { regs(dl) := scont }
               is(1) { regs(dl) := scont + (ws / 8) }
               is(2) { regs(dl) := scont - (ws / 8) }
-              is(3) { regs(dl).setAll() }
+              is(3) { regs(dl) := scont - (ws / 8) }
             }
             dready := True
           }

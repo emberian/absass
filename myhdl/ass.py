@@ -133,77 +133,68 @@ def cpu(addr, data_in, data_out, mode, ready, valid, clk, halt, reset):
                 dind = inst[10]
                 smode = inst[13:11]
                 sind = inst[13]
-                # Short: if we're writing all-1s to DST, just skip to that
-                if dmode == 3 and xf_state != XF_STAGE.WB_DST:
-                    xf_state.next = XF_STAGE.WB_DST
-                else:
-                    if xf_state == XF_STAGE.WB_PC:
-                        # This only needs to be done in case src or dst is the
-                        # PC, but nonetheless...
-                        reg[0].next = npc
-                        xf_state.next = XF_STAGE.FETCH_SRC
-                    elif xf_state == XF_STAGE.FETCH_SRC:
-                        sval = reg[sp]
-                        if smode == 3:
-                            xf.next[:] = ~intbv(0)[width:]
+                if xf_state == XF_STAGE.WB_PC:
+                    # This only needs to be done in case src or dst is the
+                    # PC, but nonetheless...
+                    reg[0].next = npc
+                    xf_state.next = XF_STAGE.FETCH_SRC
+                elif xf_state == XF_STAGE.FETCH_SRC:
+                    sval = reg[sp]
+                    if sind:
+                        if smode == 2:
+                            sval -= width // 8
+                        if valid:
+                            ready.next = False
+                            xf.next[:] = data_in
                             xf_state.next = XF_STAGE.WB_SRC
-                        elif sind:
-                            if smode == 2:
-                                sval -= width // 8
-                            if valid:
-                                ready.next = False
-                                xf.next[:] = data_in
-                                xf_state.next = XF_STAGE.WB_SRC
-                            else:
-                                mode.next = False
-                                addr.next[:] = sval
-                                ready.next = True
                         else:
-                            xf.next[:] = sval
-                            xf_state.next = XF_STAGE.WB_SRC
-                    elif xf_state == XF_STAGE.WB_SRC:
-                        sval = reg[sp]
-                        if smode == 1:
-                            reg[sp].next[:] = sval + width // 8
-                        elif smode == 2:
-                            reg[sp].next[:] = sval - width // 8
-                        xf_state.next = XF_STAGE.WRITE_DST
-                    elif xf_state == XF_STAGE.WRITE_DST:
-                        dval = reg[dl]
-                        if dind:
-                            if dmode == 2:
-                                dval -= width // 8
-                            if valid:
-                                ready.next = False
-                                xf_state.next = XF_STAGE.WB_DST
-                            else:
-                                mode.next = True
-                                addr.next[:] = dval
-                                data_out.next[:] = xf
-                                ready.next = True
-                        else:
-                            reg[dl].next[:] = xf
-                            xf_state.next = XF_STAGE.WB_DST
-                    elif xf_state == XF_STAGE.WB_DST:
-                        dval = reg[dl]
-                        if dmode == 3:
-                            reg[dl].next[:] = ~intbv(0)[width:]
-                        elif dmode == 2:
-                            reg[dl].next[:] = dval - width / 8
-                        elif dmode == 1:
-                            reg[dl].next[:] = dval + width / 8
-                        xf_state.next = XF_STAGE.WB_PC
-                        state.next = CPU_STAGE.FETCH
-                        if halt:
-                            state.next = CPU_STAGE.IDLE
-                        else:
-                            # Don't writeback PC, it could have been a source
                             mode.next = False
-                            pc = reg[0]
-                            addr.next[:] = pc
-                            npc.next[:] = pc + 2
+                            addr.next[:] = sval
                             ready.next = True
-                            state.next = CPU_STAGE.FETCH
+                    else:
+                        xf.next[:] = sval
+                        xf_state.next = XF_STAGE.WB_SRC
+                elif xf_state == XF_STAGE.WB_SRC:
+                    sval = reg[sp]
+                    if smode == 1:
+                        reg[sp].next[:] = sval + width // 8
+                    elif smode == 2 or smode == 3:
+                        reg[sp].next[:] = sval - width // 8
+                    xf_state.next = XF_STAGE.WRITE_DST
+                elif xf_state == XF_STAGE.WRITE_DST:
+                    dval = reg[dl]
+                    if dind:
+                        if dmode == 2:
+                            dval -= width // 8
+                        if valid:
+                            ready.next = False
+                            xf_state.next = XF_STAGE.WB_DST
+                        else:
+                            mode.next = True
+                            addr.next[:] = dval
+                            data_out.next[:] = xf
+                            ready.next = True
+                    else:
+                        reg[dl].next[:] = xf
+                        xf_state.next = XF_STAGE.WB_DST
+                elif xf_state == XF_STAGE.WB_DST:
+                    dval = reg[dl]
+                    if dmode == 2 or dmode == 3:
+                        reg[dl].next[:] = dval - width / 8
+                    elif dmode == 1:
+                        reg[dl].next[:] = dval + width / 8
+                    xf_state.next = XF_STAGE.WB_PC
+                    state.next = CPU_STAGE.FETCH
+                    if halt:
+                        state.next = CPU_STAGE.IDLE
+                    else:
+                        # Don't writeback PC, it could have been a source
+                        mode.next = False
+                        pc = reg[0]
+                        addr.next[:] = pc
+                        npc.next[:] = pc + 2
+                        ready.next = True
+                        state.next = CPU_STAGE.FETCH
             else:
                 opcode = inst[16:12]
                 if opcode == 0b0001:
