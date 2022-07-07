@@ -116,17 +116,16 @@ class Assembler
 
 	p_reg: (s) =>
 		s = @trim s
-		{:word, :rest} = @word s
 
-		return @ok 0, rest if word == "PC" or word == "PC,"
+		return @ok 0, s\sub 3 if s\sub(1, 2) == "PC"
 
-		if word\sub(1, 1) == "R"
-			numpart = word\sub 2
-			ix, ixf = numpart\find "%d+"
+		if s\sub(1, 1) == "R"
+			numpart = @trim s\sub 2
+			ix, ixf = numpart\find "^%d+"
 			return @fail! unless ix
 			num = tonumber numpart\sub ix, ixf
 			if num and num >= 0 and num < 16
-				return @ok num, rest
+				return @ok num, numpart\sub ixf + 1
 
 		@fail!
 
@@ -175,6 +174,16 @@ class Assembler
 			mode, s = @@MODES.autoinc, @trim s\sub 2
 		@ok {:ind, :mode, reg: reg.val}, s
 
+	p_numseq: (s) =>
+		nums = {}
+		while true
+			break if s\find "^%s*\n"
+			num = @p_num s
+			break unless num
+			table.insert nums, num.val
+			s = @optcomma num.rest
+		@ok nums, s
+
 	@INSNS: {}
 	DECL_INSN = (nm, parse) -> @INSNS[nm] = {
 		:parse
@@ -208,16 +217,22 @@ class Assembler
 		}, s
 
 	DECL_INSN ".BYTE", (s) =>
-		bytes = {}
-		while true
-			num = @p_num s
-			break unless num
-			table.insert bytes, num.val
-			s = @optcomma num.rest
+		seq = @p_numseq @trim s
+		return @die "expected number seq", s unless seq
 		@ok {
-			insn: "raw",
-			data: bytes
-		}, s
+			insn: "raw"
+			data:
+				bytes: seq.val
+		}, seq.rest
+
+	DECL_INSN ".WORD", (s) =>
+		seq = @p_numseq @trim s
+		return @die "expected number seq", s unless seq
+		@ok {
+			insn: "raw"
+			data:
+				words: seq.val
+		}, seq.rest
 
 	DECL_INSN "XF", (s) =>
 		dst = @p_xft s
@@ -285,8 +300,17 @@ class Assembler
 		@e_xfer ins.data
 
 	DECL_EMIT "raw", (ins) =>
-		for bt in *ins.data
-			@emit_maybe_byte bt
+		data = ins.data
+		local iter, emit
+		if data.bytes
+			iter = data.bytes
+			emit = @\emit_maybe_byte
+		else
+			iter = data.words
+			emit = @\emit_maybe_word
+		print 'iter', iter, 'data', data, ',', data.bytes, ',', data.words
+		for val in *iter
+			emit val
 
 	DECL_EMIT "word", (ins) => @emit_maybe_word ins.data
 
