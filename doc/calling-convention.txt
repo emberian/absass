@@ -1,0 +1,27 @@
+Register Assignment:
+
+Register 0 (PC) is the instruction pointer, this is fixed microarchitecturally. Reads and writes to it are basically as expected, although note there is a builtin +2 increment to the PC every cycle. This combines with any automodification.
+
+Register 1 (SP) is the Stack Pointer, a region of memory that "grows downwards", wherein the element with the smallest logical address is the most recently pushed. SP points to the last element. Some common instruction sequences for stack manipulation:
+
+Push a word: 
+	XF *-SP, src_reg
+Pop a word: 
+	XF dst_reg, *SP+
+
+Register 2 (FP) is the Frame Pointer. This points to the current Activation Record, a region of the stack. This is constant for the lifetime of a function activation. Use offsets from it to access stack locals.
+
+Register 3 (RC) is the Continuation Address. This points to the instruction to jump to to activate the continuation the caller desires us to complete with. Feel free to reuse this register, although remember its contents or else the resumption continuation will be lost forever.
+
+Registers 4-10 (A0-A5) are the Argument Registers. These are used for passing arguments, as the name suggests, but if the function doesn't use that many arguments, it's Free Real Estate. These are all caller-saved. They are also used for returning values to the caller.
+
+Registers 11-15 (T0-T4) are the Temporary Registers. These are callee-saved. If you want to use one of these, remember to put it back the way you found it.
+
+An instruction sequence for jumping to register jmp_target while linking activation records correctly, supposing A5 was used as a local:
+
+	XF *-SP, A5
+	XF *-SP, FP
+	MOV FP, SP
+	JAL RA, jmp_target
+	XF FP, *SP+
+	xF A5, *SP+

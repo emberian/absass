@@ -93,4 +93,18 @@ The _increment mode_ is a two bit value interpreted as:
 			- S 3: Power State (W)
 				- 0x01: Halt
 
+			- S 4: Instructions Retired (RW)
+				- This counts up after every retired instruction.
+				  Writing to this register starts counting from that
+				  value. Initializes to 0 on reset.
+
+			- S 5: Cycles Elapsed (RW)
+				- This counts the number of cycles elapsed.
+				  Writing to this register starts counting from that
+				  value. Initializes to 0 on reset.
+
+			- S 6: Core Frequency (R)
+				- Frequency of the Cycles Elapsed counter, divided
+				  by 1024 to produce kibiHertz.
+
 			-S 192-255: Reserved for Vendor Extensions
