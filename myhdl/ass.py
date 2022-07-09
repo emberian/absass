@@ -13,6 +13,9 @@ SUBDIR = 'verilog'
 os.makedirs(SUBDIR, exist_ok = True)
 
 STEPPING = 0
+CLOCKRATE = 1024
+
+CAP_HAS_MUL = 1
 
 @block
 def logic_unit(p, q, op, out):
@@ -97,7 +100,7 @@ def cpu(addr, data_in, data_out, mode, ready, valid, clk, halt, reset, addr_skip
     logic = logic_unit(d, s, l_op, l_out)
 
     a_op, a_out = Signal(ARITH.ADD), Signal(modbv(0)[width:])
-    arith = arith_unit(d, s, a_op, a_out, False)
+    arith = arith_unit(d, s, a_op, a_out)
 
     c_eq, c_gt, c_sn, c_iv, c_out = map(Signal, [False] * 5)
     comp = comp_unit(d, s, c_eq, c_gt, c_sn, c_iv, c_out)
@@ -111,11 +114,14 @@ def cpu(addr, data_in, data_out, mode, ready, valid, clk, halt, reset, addr_skip
     xf_state = Signal(XF_STAGE.WB_PC)
 
     ivt = Signal(intbv(0)[width:])  # Unused as of yet
+    cycles = Signal(modbv(0)[width:])
+    ins_retired = Signal(modbv(0)[width:])
     
     @always_seq(clk.posedge, reset=reset)
     def tick():
         # Keep the branches of this if unmerged; it helps MyHDL realize that
         # it's actually a case analysis
+        cycles.next = cycles + 1
         if state == CPU_STAGE.IDLE:
             if not halt:
                 state.next = CPU_STAGE.FETCH
@@ -202,6 +208,7 @@ def cpu(addr, data_in, data_out, mode, ready, valid, clk, halt, reset, addr_skip
                         regs[dl].next[:] = dval + width / 8
                     xf_state.next = XF_STAGE.WB_PC
                     state.next = CPU_STAGE.FETCH
+                    ins_retired.next = ins_retired + 1
                     if halt:
                         state.next = CPU_STAGE.IDLE
                     else:
@@ -211,7 +218,6 @@ def cpu(addr, data_in, data_out, mode, ready, valid, clk, halt, reset, addr_skip
                         addr.next[:] = pc
                         npc.next[:] = pc + 2
                         ready.next = True
-                        state.next = CPU_STAGE.FETCH
             else:
                 opcode = inst[16:12]
                 if opcode == 0b0001:
@@ -276,6 +282,22 @@ def cpu(addr, data_in, data_out, mode, ready, valid, clk, halt, reset, addr_skip
                             if v & 0x1:
                                 state.next = CPU_STAGE.HALT
                                 return
+                    elif sr == 4:
+                        if write:
+                            ins_retired.next = regs[r]
+                        else:
+                            regs[r].next = ins_retired
+                    elif sr == 5:
+                        if write:
+                            cycles.next = regs[r]
+                        else:
+                            regs[r].next = cycles
+                    elif sr == 6:
+                        if not write:
+                            regs[r].next = CLOCKRATE
+                    elif sr == 7:
+                        if not write:
+                            regs[r].next = CAP_HAS_MUL
                 state.next = CPU_STAGE.WRITEBACK
         elif state == CPU_STAGE.WRITEBACK:
             dl = inst[4:0]
@@ -300,6 +322,7 @@ def cpu(addr, data_in, data_out, mode, ready, valid, clk, halt, reset, addr_skip
                 mode.next = False
                 ready.next = True
                 state.next = CPU_STAGE.FETCH
+                ins_retired.next = ins_retired + 1
                 bits_valid.next[:] = 0
 
     return logic, arith, comp, tick
