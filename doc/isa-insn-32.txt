@@ -95,6 +95,7 @@ The _increment mode_ is a two bit value interpreted as:
 				- Otherwise: Reserved
 
 			- S 1: Compiled Word Size (R)
+				- in bits
 
 			- S 2: Interrupt Vector Table (RW)
 				- SPEC TODO
