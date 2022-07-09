@@ -41,7 +41,6 @@ class Assembler
 		0
 
 	emit_byte: (by) =>
-		print "byte", by
 		@out\write string.char by
 		@origin += 1
 
@@ -82,10 +81,45 @@ class Assembler
 		JAL: 0x9000
 		SR: 0xa000
 
+	@ARITH:
+		ADD: 0
+		SUB: 1
+		SHL: 2
+		SHR: 3
+		ASR: 4
+		MUL: 5
+		DIV: 6
+		MOD: 7
 
 	e_logic: (data) =>
 		{:tbl, :src, :dst} = data
 		@emit (@@OPCODE.LOGIC | ((tbl&0xf)<<8) | ((src&0xf)<<4) | (dst&0xf))
+
+	e_arith: (data) =>
+		{:op, :src, :dst} = data
+		@emit (@@OPCODE.ARITH | ((op&0x7)<<8) | ((src&0xf)<<4) | (dst&0xf))
+
+	e_comp: (data) =>
+		{:eq, :gt, :sn, :iv, :src, :dst} = data
+		eq, gt, sn, iv = @bit(eq), @bit(gt), @bit(sn), @bit(iv)
+		@emit (
+			@@OPCODE.COMP |
+			(iv << 11) |
+			(sn << 10) |
+			(gt << 9) |
+			(eq << 8) |
+			((src&0xf)<<4) |
+			(dst&0xf)
+		)
+
+	e_jc: (data) =>
+		{:cmp, :offset} = data
+		@emit_byte (@@OPCODE.COND | ((cmp&0xf)<<8)) >> 8
+		@emit_maybe_byte offset
+
+	e_jal: (data) =>
+		{:prog, :link} = data
+		@emit (@@OPCODE.JAL | ((prog&0xf)<<4) | (link&0xf))
 
 	e_xfer: (data) =>
 		{:src, :dst} = data
@@ -117,9 +151,16 @@ class Assembler
 
 	p_num: (s) =>
 		s = @trim s
-		{:word, :rest} = @word s
-		num = tonumber(word)
-		return @ok num, rest if num
+		-- The current origin
+		return @ok @origin, s\sub 2 if s\sub(1, 1) == "$"
+		-- A character constant
+		if s\sub(1, 1) == "'"
+			return @die "expected closing quote", s unless s\sub(3, 3) == "'"
+			return @ok s\byte(2), s\sub(4)
+		ixs, ixe = s\find "^[%da-fA-F]+"
+		if ixs
+			num = tonumber s\sub ixs, ixe
+			return @ok num, s\sub ixe + 1 if num
 		-- Try a label name instead
 		lbl = @p_labelname s
 		return @fail! unless lbl
@@ -127,6 +168,46 @@ class Assembler
 		addr = @get_label glob, loc
 		return @die "No address for label " .. glob .. "." .. loc, s unless addr
 		@ok addr, lbl.rest
+
+	p_expr: (s) => @p_additive s
+
+	p_additive: (s) =>
+		term = @p_term s
+		return @fail! unless term
+		{val: ex, rest: s} = term
+		s = @trim s
+		c = s\sub 1, 1
+		while c == "+" or c == "-"
+			rhs = @p_term s\sub 2
+			return @die "expected term", s unless rhs
+			ex = {op: c, lhs: ex, rhs: rhs.val}
+			s = @trim rhs.rest
+			c = s\sub 1, 1
+		@ok ex, s
+
+	p_term: (s) =>
+		atom = @p_atom s
+		return @fail! unless atom
+		{val: ex, rest: s} = atom
+		s = @trim s
+		c = s\sub 1, 1
+		while c == "*" or c == "/"
+			rhs = @p_atom s\sub 2
+			return @die "expected atom", s unless rhs
+			ex = {op: c, lhs: ex, rhs: rhs.val}
+			s = @trim rhs.rest
+			c = s\sub 1, 1
+		@ok ex, s
+
+	p_atom: (s) =>
+		s = @trim s
+		if s\sub(1, 1) == "("
+			ex = @p_expr s\sub 2
+			return @die "expected expression", s unless ex
+			s = @trim ex.rest
+			return @die "expected ')'", s unless s\sub(1, 1) == ")"
+			return @ok ex.val, s\sub 2
+		@p_num s
 
 	p_reg: (s) =>
 		s = @trim s
@@ -188,11 +269,15 @@ class Assembler
 			mode, s = @@MODES.autoinc, @trim s\sub 2
 		@ok {:ind, :mode, reg: reg.val}, s
 
-	p_numseq: (s) =>
+	p_seq: (s) =>
 		nums = {}
 		while true
 			break if s\find "^%s*\n"
-			num = @p_num s
+			s = @trim s
+			if s\sub(1, 1) == ";"
+				s = s\sub 2
+				break
+			num = @p_expr s
 			break unless num
 			table.insert nums, num.val
 			s = @optcomma num.rest
@@ -230,8 +315,30 @@ class Assembler
 				dst: dst.val
 		}, s
 
+	DECL_INSN "ZERO", (s) =>
+		reg = @p_reg s
+		return @die "expected register", s unless reg
+		@ok {
+			insn: "logic"
+			data:
+				tbl: 0  -- the "false" table
+				src: 0  -- doesn't matter
+				dst: reg.val
+		}, reg.rest
+
+	DECL_INSN "ONE", (s) =>
+		reg = @p_reg s
+		return @die "expected register", s unless reg
+		@ok {
+			insn: "logic"
+			data:
+				tbl: 0xf  -- the "true" table
+				src: 0  -- doesn't matter
+				dst: reg.val
+		}, reg.rest
+
 	DECL_INSN ".BYTE", (s) =>
-		seq = @p_numseq @trim s
+		seq = @p_seq @trim s
 		return @die "expected number seq", s unless seq
 		@ok {
 			insn: "raw"
@@ -240,13 +347,29 @@ class Assembler
 		}, seq.rest
 
 	DECL_INSN ".WORD", (s) =>
-		seq = @p_numseq @trim s
+		seq = @p_seq @trim s
 		return @die "expected number seq", s unless seq
 		@ok {
 			insn: "raw"
 			data:
 				words: seq.val
 		}, seq.rest
+
+	for name, op in pairs @ARITH
+		DECL_INSN name, (s) =>
+			dst = @p_reg s
+			return @die "expected dest register", s unless dst
+			s = @trim @optcomma dst.rest
+			src = @p_reg s
+			return @die "expected source register", s unless src
+			s = @trim @optcomma src.rest
+			@ok {
+				insn: "arith"
+				data:
+					:op
+					src: src.val
+					dst: dst.val
+			}, s
 
 	DECL_INSN "XF", (s) =>
 		dst = @p_xft s
@@ -266,7 +389,7 @@ class Assembler
 		dst = @p_reg s
 		return @die "expected dest register", s unless dst
 		s = @optcomma dst.rest
-		num = @p_num s
+		num = @p_expr s
 		return @die "expected immediate", s unless num
 		@ok {
 			insn: "seq"
@@ -292,7 +415,7 @@ class Assembler
 		src = @p_reg s
 		return @die "expected source register", s unless src
 		s = @trim @optcomma src.rest
-		op = @p_num s
+		op = @p_expr s
 		return @die "expected operation", s unless op
 		@ok {
 			insn: "logic"
@@ -313,7 +436,7 @@ class Assembler
 		reg = @p_reg s
 		return @die "Expected reg", s unless reg
 		s = @trim @optcomma reg.rest
-		sr = @p_num s
+		sr = @p_expr s
 		return @die "Expected SR number", s unless sr
 		s = sr.rest
 		@ok {
@@ -324,6 +447,56 @@ class Assembler
 				sr: sr.val
 		}, s
 
+	DECL_INSN "JC", (s) =>
+		cmp = @p_reg s
+		return @die "expected comp reg", s unless cmp
+		s = @trim @optcomma cmp.rest
+		off = @p_expr s
+		return @die "expected offset", s unless off
+		s = @trim @optcomma off.rest
+		@ok {
+			insn: "jc"
+			data:
+				cmp: cmp.val
+				offset: off.val
+		}, s
+
+	DECL_INSN "JAL", (s) =>
+		link = @p_reg s
+		return @die "expected link reg", s unless link
+		s = @trim @optcomma link.rest
+		prog = @p_reg s
+		return @die "expected prog reg", s unless prog
+		s = @trim @optcomma prog.rest
+		@ok {
+			insn: "jal"
+			data:
+				link: link.val
+				prog: prog.val
+		}, s
+
+	charif = (b, ch) ->
+		return ch if b
+		""
+
+	for cmpcode = 0, 15
+		eq, gt, sn, iv = (cmpcode&1~=0), (cmpcode&2~=0), (cmpcode&4~=0), (cmpcode&8~=0)
+		iname = "CMP." .. charif(eq, "E") .. charif(gt, "G") .. charif(sn, "S") .. charif(iv, "I")
+		DECL_INSN iname, (s) =>
+			dst = @p_reg s
+			return @die "expected dest reg", s unless dst
+			s = @trim @optcomma dst.rest
+			src = @p_reg s
+			return @die "expected source reg", s unless src
+			s = @trim @optcomma src.rest
+			@ok {
+				insn: "comp"
+				data:
+					:eq, :gt, :sn, :iv
+					src: src.val
+					dst: dst.val
+			}, s
+
 	@EMITTERS: {}
 	DECL_EMIT = (ins, emit) -> @EMITTERS[ins] = {
 		:emit
@@ -331,8 +504,15 @@ class Assembler
 
 	DECL_EMIT "logic", (ins) => @e_logic ins.data
 
+	DECL_EMIT "arith", (ins) => @e_arith ins.data
+
+	DECL_EMIT "comp", (ins) => @e_comp ins.data
+
+	DECL_EMIT "jc", (ins) => @e_jc ins.data
+
+	DECL_EMIT "jal", (ins) => @e_jal ins.data
+
 	DECL_EMIT "xfer", (ins) =>
-		print "xfer", ins.data.src, ins.data.dst
 		@e_xfer ins.data
 
 	DECL_EMIT "raw", (ins) =>
@@ -344,7 +524,6 @@ class Assembler
 		else
 			iter = data.words
 			emit = @\emit_maybe_word
-		print 'iter', iter, 'data', data, ',', data.bytes, ',', data.words
 		for val in *iter
 			emit val
 
@@ -385,17 +564,52 @@ class Assembler
 		g[loc] = {forward: true, global: glob, local: loc} unless g[loc]
 		g[loc]
 
+	@FUNCS:
+		"+": (a, b) -> a + b
+		"-": (a, b) -> a - b
+		"*": (a, b) -> a * b
+		"/": (a, b) -> math.floor(a / b)
+
+	fold: (ex) =>
+		return ex if type(ex) == "number"
+		return ex.val if ex.val
+		if ex.op
+			{:op, :lhs, :rhs} = ex
+			l, r = @fold(lhs), @fold(rhs)
+			if type(l) == "number" and type(r) == "number"
+				return @@FUNCS[op](l, r)
+		ex
+
+	format_ex: (ex, depth = 0) =>
+		s = "  "
+		s = s\rep depth
+		if type(ex) == "number"
+			s = s .. tostring(ex) .. "\n"
+		elseif ex.op
+			s = s .. ex.op .. "\n" .. @format_ex(ex.lhs, depth + 1) .. @format_ex(ex.rhs, depth + 1)
+		elseif ex.global
+			{global: glob, local: loc} = ex
+			s = s .. "ref: " .. glob .. "." .. loc
+			if ex.val
+				s = s .. " @" .. ex.val
+			s = s .. "\n"
+		else
+			s = s .. "something: "
+			for k, v in pairs ex
+				s = s .. tostring(k) .. "=" .. tostring(v) .. " "
+			s = s .. "\n"
+		s
+
 	force: (v) =>
+		v = @fold v
 		return v if type(v) == "number"
 		if type(v) == "table"
 			return v.val if v.val
-			{global: glob, local: loc} = v
-			error "Reference to label " .. glob .. '.' .. loc .. " undefined at time of emission"
+			error "Value unresolvable at emission time:\n" .. @format_ex(v)
 		error "Unknown type of value " .. type(v)
 
 	one: (s) =>
 		{:val, :rest} = @p_insn s
-		print 'One val:', val
 		-- Labels
 		if val.label
 			{global: glob, local: loc} = val.label
@@ -417,8 +631,7 @@ class Assembler
 		for fix in *@fixups
 			@origin = fix.where
 			@out\seek("set", @origin)
-			{global: glob, local: loc} = fix.ref
-			val = @force @get_label glob, loc
+			val = @force fix.ref
 			print 'fix ' .. fix.emit .. ' at ' .. @origin .. ' to ' .. val
 			switch fix.emit
 				when "word" then @emit_word val
@@ -435,13 +648,14 @@ class Assembler
 				else
 					print '  - ' .. loc .. ' = (forward) ' .. tostring(addr.val)
 
-unless arg[1]
-	print 'Usage: lua (this script) out.bin < in.asm'
-	return
+if arg
+	unless arg[1]
+		print 'Usage: lua (this script) out.bin < in.asm'
+		return
 
-source = io.read "*a"
-assembler = Assembler arg[1], 16
-assembler\run source
-assembler\info!
+	source = io.read "*a"
+	assembler = Assembler arg[1], 16
+	assembler\run source
+	assembler\info!
 
 {:Assembler}
