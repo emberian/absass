@@ -1,21 +1,3 @@
-/*
- * SpinalHDL
- * Copyright (c) Dolu, All rights reserved.
- *
- * This library is free software; you can redistribute it and/or
- * modify it under the terms of the GNU Lesser General Public
- * License as published by the Free Software Foundation; either
- * version 3.0 of the License, or (at your option) any later version.
- *
- * This library is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * Lesser General Public License for more details.
- *
- * You should have received a copy of the GNU Lesser General Public
- * License along with this library.
- */
-
 package absass
 
 import spinal.core._
@@ -154,6 +136,12 @@ class CPU(val ws: Int, val fancy: Boolean) extends Module {
   val dl = Reg(UInt(4 bits))
   val sp = Reg(UInt(4 bits))
 
+  val inst_ret = Reg(Word) init (0)
+  inst_ret.allowOverride
+  val cycl_ct = Reg(Word) init (0)
+
+  cycl_ct := cycl_ct + 1
+
   io.insn_addr.valid := False
   io.insn_addr.payload := 0
   io.insn_content.ready := False
@@ -196,6 +184,11 @@ class CPU(val ws: Int, val fancy: Boolean) extends Module {
   }
 
   val result = Reg(Word)
+  val halt = Reg(Bool())
+
+  when(io.halt) {
+    halt := True
+  }
 
   result := 0
 
@@ -287,7 +280,8 @@ class CPU(val ws: Int, val fancy: Boolean) extends Module {
           io.mem_addr.valid := False
           io.mem_is_write := False
           pc_stowed := False
-          when(io.halt) {
+          inst_ret := inst_ret + 1
+          when(halt) {
             state := Stages.s_idle
           }.otherwise {
             state := Stages.s_fetch
@@ -295,57 +289,112 @@ class CPU(val ws: Int, val fancy: Boolean) extends Module {
         }
       }
     }.otherwise {
-      switch(inst(15 downto 12)) {
-        is(1) {
-          logic.io.q := regs.read(dl)
-          logic.io.p := regs.read(sp)
-          logic.io.op := inst(11 downto 8)
-          result := logic.io.res
-          printf(s"logic op=${inst(11 downto 8)}\n")
-        }
-        is(2) {
-          arith.io.d := regs.read(dl)
-          arith.io.s := regs.read(sp)
-          arith.io.op.assignFromBits(inst(10 downto 8).asBits)
-          result := arith.io.res
-        }
-        is(3) {
-          compare.io.d := regs.read(dl)
-          compare.io.s := regs.read(sp)
-          compare.io.eq := inst(8)
-          compare.io.gt := inst(9)
-          compare.io.sn := inst(10)
-          compare.io.iv := inst(11)
-          result := compare.io.res.asUInt(ws bits)
-        }
-        is(8) {
-          // conditional
-          val offset = inst(7 downto 0)
-          val cmp = inst(11 downto 8)
-          when(regs(cmp) =/= 0) {
-            pc := (pc.asSInt + offset.resize(ws bits).asSInt).asUInt
+      when(inst(15 downto 13) === 5) {
+        val is_wr = inst(12)
+        val dst = inst(11 downto 8)
+        val oughta_halt = False
+        switch(inst(7 downto 0)) {
+          is(0) {
+            when(!is_wr) {
+              regs(dst) := U(0, ws bits)
+            }
           }
-          result := regs.read(dl) // ew
+          is(1) {
+            when(!is_wr) {
+              regs(dst) := U(ws, ws bits)
+            }
+          }
+          is(2) {
+            when(!is_wr) {
+              regs(dst) := U(0, ws bits) // TODO: define and implement
+            }
+          }
+          is(3) {
+            when(is_wr) {
+              halt := regs(dst) =/= 0
+              oughta_halt := True
+            }
+          }
+          is(4) {
+            when(is_wr) {
+              inst_ret := regs(dst)
+            }.otherwise {
+              regs(dst) := inst_ret
+            }
+          }
+          is(5) {
+            when(is_wr) {
+              cycl_ct := regs(dst)
+            }.otherwise {
+              regs(dst) := cycl_ct
+            }
+          }
+          is(6) {
+            when(!is_wr) {
+              regs(dst) := U(15, ws bits) // FIXME
+            }
+          }
         }
-        is(9) {
-          result := pc
-          pc := regs.read(sp)
-        }
-      }
-      state := Stages.s_writeback
-    }
 
+        inst_ret := inst_ret + 1
+        when(halt || oughta_halt) {
+          state := Stages.s_idle
+        }.otherwise {
+          state := Stages.s_fetch
+        }
+      }.otherwise {
+        switch(inst(15 downto 12)) {
+          is(1) {
+            logic.io.q := regs.read(dl)
+            logic.io.p := regs.read(sp)
+            logic.io.op := inst(11 downto 8)
+            result := logic.io.res
+            printf(s"logic op=${inst(11 downto 8)}\n")
+          }
+          is(2) {
+            arith.io.d := regs.read(dl)
+            arith.io.s := regs.read(sp)
+            arith.io.op.assignFromBits(inst(10 downto 8).asBits)
+            result := arith.io.res
+          }
+          is(3) {
+            compare.io.d := regs.read(dl)
+            compare.io.s := regs.read(sp)
+            compare.io.eq := inst(8)
+            compare.io.gt := inst(9)
+            compare.io.sn := inst(10)
+            compare.io.iv := inst(11)
+            result := compare.io.res.asUInt(ws bits)
+          }
+          is(8) {
+            // conditional
+            val offset = inst(7 downto 0)
+            val cmp = inst(11 downto 8)
+            when(regs(cmp) =/= 0) {
+              pc := (pc.asSInt + offset.resize(ws bits).asSInt).asUInt
+            }
+            result := regs.read(dl) // ew
+          }
+          is(9) {
+            result := pc
+            pc := regs.read(sp)
+          }
+        }
+        state := Stages.s_writeback
+      }
+
+    }
   }
 
   regs.allowOverride
   when(state === Stages.s_writeback) {
-    dl := inst(3 downto 0)
     printf(
       s"writing back $inst, dl = $dl, jump to $pc, units logic=${logic.io.res}, arith=${arith.io.res}, compare=${compare.io.res}\n"
     )
     regs.write(dl, result)
     regs.write(pc_reg, pc)
-    when(io.halt) {
+    inst_ret := inst_ret + 1
+    when(halt) {
       state := Stages.s_idle
     }.otherwise {
       state := Stages.s_fetch
@@ -356,6 +405,12 @@ class CPU(val ws: Int, val fancy: Boolean) extends Module {
 object Icestick {
   def main(args: Array[String]) {
     SpinalVerilog(new CPU(4, false))
+  }
+}
+
+object Crosslink {
+  def main(args: Array[String]) {
+    SpinalVerilog(new CPU(16, true))
   }
 }
 
