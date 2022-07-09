@@ -1,0 +1,124 @@
+This is for a provisional, experimental version of the same ISA, with 32-bit
+instruction words.
+
+Values are shown in their natural big-endian representation.
+
+Instruction 0xABCDEFGH, or
+0baaaabbbbccccddddeeeeffffgggghhhh:
+
+           aaaa bbbb  cccc dddd  eeee ffff  gggg hhhh
+           3322 2222  2222 1111  1111 11             
+Bit        1098 7654  3210 9876  5432 1098  7654 3210
+
+C syntax is used in explications; familiarity with it is assumed.
+
+Ranges [a:b] are inclusive on b, but exclusive on a; e.g. [32:28] are the 4 (=32-28) bits 28, 29, 30, and 31.
+
+- I[32:28] == 0b0001   ( BITWISE INSTRUCTIONS )
+	- I[8:0]: (D) Destination Register (0-255) 
+	- I[16:8]: (Q) RHS Register (0-255)
+	- I[24:16]: (P) LHS Register (0-255)
+	- I[28:24]: (M) Truth Table Number (0-15)
+		- cf. https://en.wikipedia.org/wiki/Truth_table#Binary_operations
+			0: F    1: NOR  2: NCI  3: ND
+			4: NMI	5: NS	6: XOR	7: NAND
+			8: AND	9: XNOR	10: S	11: MI
+			12: D	13: CI	14: OR	15: T
+
+- I[32:28] == 0b0010	( ARITHMETIC INSTRUCTIONS )
+	- I[8:0]: (D) Destination Register (0-255)
+	- I[16:8]: (Q) RHS Register (0-255)
+	- I[24:16]: (P) LHS Register (0-255)
+	- I[27:24]: (M) Operation Number (0-7)
+		- 0: Add (D = P + Q)
+		- 1: Sub (D = P - Q)
+		- 2: Shl (D = P << Q, fill 0)
+		- 3: Shr (D = P >> Q, fill 0)
+		- 4: Asr (D = P >> Q, fill sign)
+		- 5: Mul (D = P * Q) *
+		- 6: Div (D = P / Q) *
+		- 7: Mod (D = P % Q) *
+		Instructions marked (*) are available only on models with a hardware
+		multiplier (see SR 7).
+
+- I[32:30] == 0b01    ( DATA TRANSFER INSTRUCTIONS )
+    - I[8:0]: (D) Destination Register (0-255)
+    - I[16:8]: (S) Source Register (0-255)
+    - I[18]: (Dm) Destination indirect
+    - I[18:16]: (Da) Destination increment mode 
+    - I[21]: (Sm) Source indirect
+    - I[21:19]: (Sa) Source increment mode
+	- I[30:22]: (So) 8-bit signed Source Offset
+
+The _indirect bit_, if set, uses the register contents as a memory address and generates the appropriate load/store behavior.
+
+The _increment mode_ is a two bit value interpreted as:
+
+    - 0b00 - no change is made to the registers
+    - 0b01 - autoincrement: increment the value of the register by $WORDBYTES after the memory operation
+    - 0b10 - autodecrement: decrement the value of the register by $WORDBYTES before the operation
+    - 0b11 - autopostdecrement: decrement the value of the register by $WORDBYTES after the memory operation
+
+
+- I[32:28] == 0b0011	( COMPARISON INSTRUCTIONS )
+	- I[8:0]: (D) Destination Register (0-255)
+	- I[16:8]: (Q) RHS Register (0-255)
+	- I[24:16]: (P) LHS Register (0-255)
+	- I[24]: EQ Flag: True when D = S
+	- I[25]: GT Flag: True when D > S
+	- I[26]: SN Flag: GT respects sign
+	- I[27]: IV FLag: Test is inverted
+		- I[28:24] table: (AB = "above", BL = "below", both unsigned)
+			0: F	1: EQ	2: AB	3: ABE
+			4: F	5: EQ	6: GT	7: GTE
+			8: T	9: NEQ	10: BLE	11: BL
+			12: T	13: NEQ	14: LT	15: LTE
+
+- I[32:24] == 0b1000000	( CONDITIONAL INSTRUCTIONS )
+	- I[16:0]: (S) *Signed* Offset (in *Instructions*)
+	- I[24:16]: (C) Comparison Register (0-255)
+		- Condition is passed if reg is nonzero
+
+- I[32:24] == 0b1001000	( JUMP AND LINK )
+	- I[8:0]: (L) Link Register (written, next PC) (0-255)
+	- I[16:8]: (P) Program Register (read, new PC) (0-255)
+	- I[24:16]: Reserved
+
+- I[32:25] == 0b1010000		( SYSTEM REGISTERS )
+	- I[24]: (W) 1: Write, 0: Read
+	- I[24:16]: (R) Register (0-255)
+	- I[16:0]: (S) System Register (0-65535)
+		- System Registers (R: Read, W: Write):
+
+			- S 0: Model/Stepping (R)
+				- 0: Unknown or prototype
+				- Otherwise: Reserved
+
+			- S 1: Compiled Word Size (R)
+
+			- S 2: Interrupt Vector Table (RW)
+				- SPEC TODO
+
+			- S 3: Power State (W)
+				- bit 0: Halt
+				- all other bits: reserved, write 0
+
+			- S 4: Instructions Retired (RW)
+				- This counts up after every retired instruction.
+				  Writing to this register starts counting from that
+				  value. Initializes to 0 on reset.
+
+			- S 5: Cycles Elapsed (RW)
+				- This counts the number of cycles elapsed.
+				  Writing to this register starts counting from that
+				  value. Initializes to 0 on reset.
+
+			- S 6: Core Frequency (R)
+				- Frequency of the Cycles Elapsed counter, divided
+				  by 1024 to produce kibiHertz.
+
+			- S 7: ISA Extensions (R)
+				- bit 0: Hardware multiplier
+				- all other bits: reserved
+
+			-S 49152-65535: Reserved for Vendor Extensions

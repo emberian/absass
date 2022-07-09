@@ -29,9 +29,11 @@ Ranges of [a:b] are inclusive of both endpoints (forgive me).
 		- 2: Shl (D = D << S, fill 0)
 		- 3: Shr (D = D >> S, fill 0)
 		- 4: Asr (D = D >> S, fill sign)
-		- 5: Mul (D = D * S)
-		- 6: Div (D = D / S)
-		- 7: Mod (D = D % S)
+		- 5: Mul (D = D * S) *
+		- 6: Div (D = D / S) *
+		- 7: Mod (D = D % S) *
+		Instructions marked (*) are available only on models with a hardware
+		multiplier (see SR 7).
 		
 
 - I[15:14] == 0b01    ( DATA TRANSFER INSTRUCTIONS )
@@ -91,7 +93,8 @@ The _increment mode_ is a two bit value interpreted as:
 				- SPEC TODO
 
 			- S 3: Power State (W)
-				- 0x01: Halt
+				- bit 0: Halt
+				- all other bits: reserved, write 0
 
 			- S 4: Instructions Retired (RW)
 				- This counts up after every retired instruction.
@@ -106,5 +109,9 @@ The _increment mode_ is a two bit value interpreted as:
 			- S 6: Core Frequency (R)
 				- Frequency of the Cycles Elapsed counter, divided
 				  by 1024 to produce kibiHertz.
+
+			- S 7: ISA Extensions (R)
+				- bit 0: Hardware multiplier
+				- all other bits: reserved
 
 			-S 192-255: Reserved for Vendor Extensions
