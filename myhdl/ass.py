@@ -89,7 +89,7 @@ def mem_xlate_rd():
     pass
 
 @block
-def cpu(addr, data_in, data_out, mode, ready, valid, clk, halt, reset, addr_skip = 2):
+def cpu(addr, data_in, data_out, mode, ready, valid, clk, halt, reset, d_ready, d_out, addr_skip = 2):
     width = len(addr)
 
     state = Signal(CPU_STAGE.IDLE)
@@ -298,6 +298,10 @@ def cpu(addr, data_in, data_out, mode, ready, valid, clk, halt, reset, addr_skip
                     elif sr == 7:
                         if not write:
                             regs[r].next = CAP_HAS_MUL
+                    elif sr == 10:
+                        if write:
+                            d_ready.next = True
+                            d_out.next = regs[r]
                 state.next = CPU_STAGE.WRITEBACK
         elif state == CPU_STAGE.WRITEBACK:
             dl = inst[4:0]
@@ -576,11 +580,13 @@ def cpu_test(w, _ignored=0):
     clk = Signal(False)
     halt = Signal(False)
     reset = ResetSignal(True, active=True, isasync=True)
+    debug_ready = Signal(False)
+    debug_out = Signal(modbv(0)[w:])
 
-    cpu_unit = cpu(addr, data_to_cpu, data_to_ram, mode, ready, valid, clk, halt, reset, 2)
+    cpu_unit = cpu(addr, data_to_cpu, data_to_ram, mode, ready, valid, clk, halt, reset, debug_ready, debug_out, 2)
     try_convert(cpu_unit)
     mem = cpu_ram(
-            open('../assembler/test.bin', 'rb').read(),
+            open('../assembler/hello.bin', 'rb').read(),
             addr, data_to_ram, data_to_cpu, mode, ready, valid,
             min((8, w))
     )
@@ -590,10 +596,13 @@ def cpu_test(w, _ignored=0):
         # Allow a reset to occur
         yield delay(1)
         reset.next = False
-        for step in range(48):
-            print(f'{now()}:\t{"tick" if clk else "tock"}\t@{addr}/O={data_to_ram}/I={data_to_cpu}:{"W" if mode else "R"},{"V" if valid else " "}{"R" if ready else " "}\tnpc={cpu_unit.sigdict["npc"]}\tstate={cpu_unit.sigdict["state"]}\tinst={cpu_unit.sigdict["inst"]}/{cpu_unit.sigdict["bits_valid"]}\txf={cpu_unit.sigdict["xf"]},{cpu_unit.sigdict["xf_state"]}\n\tregs={" ".join(hex(i.val)[2:].rjust(4, "0") for i in cpu_unit.symdict["regs"])}')
+        while cpu_unit.symdict['state'] != CPU_STAGE.HALT:
+            #print(f'{now()}:\t{"tick" if clk else "tock"}\t@{addr}/O={data_to_ram}/I={data_to_cpu}:{"W" if mode else "R"},{"V" if valid else " "}{"R" if ready else " "}\tnpc={cpu_unit.sigdict["npc"]}\tstate={cpu_unit.sigdict["state"]}\tinst={cpu_unit.sigdict["inst"]}/{cpu_unit.sigdict["bits_valid"]}\txf={cpu_unit.sigdict["xf"]},{cpu_unit.sigdict["xf_state"]}\n\tregs={" ".join(hex(i.val)[2:].rjust(4, "0") for i in cpu_unit.symdict["regs"])}')
             clk.next = not clk
             yield delay(1)
+            if debug_ready:
+                debug_ready.next = False
+                print(chr(debug_out))
 
     return cpu_unit, mem, temporal
 
