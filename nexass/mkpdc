@@ -1,0 +1,61 @@
+#!/usr/bin/env python3
+
+seen_stuff = []
+
+def e(port, name):
+    seen_stuff.append((port, name))
+    return f"ldc_set_location -site {{{port}}} [get_ports {{{name}}}]"
+
+def g(ports, name):
+    return [e(p,f"{name}[{i}]") for i, p in enumerate(ports)]
+
+def pmod(i, ports):
+    ns = [1,2,3,4,7,8,9,10]
+    return [e(p, f"pmod{i}_{ns[j]}[{j}]") for j, p in enumerate(ports)]
+
+def hram(i, ctr_ports, dq_ports):
+    ns = "cs,rst,ckn,ck,rw".split(',')
+    return [e(p, f"hr{i}_dq[{j}]") for j, p in enumerate(dq_ports)] +\
+           [e(p, f"hr{i}_{ns[j]}") for j, p in enumerate(ctr_ports)]
+
+o = lambda a, b: [e(a, b)]
+
+data = [
+        g([ "H1", "J1", "H5", "H6"], "led"),
+        g([ "J7", "J6", "J2"], "rgb0") ,
+        g([ "J3", "J4", "J5"],"rgb1"),
+        #o("D14", "done"), these seem fixed for the device mgmt lifecycle
+        #o("D12", "initn"),
+        g([ "R5", "T4", "R7", "T8"],"dipsw"),
+        o( "L2", "gsrn"),
+        o("K2", "pushbutton0"),
+        o("L1", "pushbutton1"),
+        o("D13", "programn"),
+        hram(0, ["N5", "P6", "P4", "R4", "U4"],
+                [ "U5", "U6", "T6", "N6", "P6", "U7", "U8", "T7" ]),
+        hram(1, [ "T9", "P7", "U11", "T11", "N7"], 
+                [ "P8" , "N8" , "U9" , "U10", "T10", "R10", "P9" , "N9" ]),
+        pmod(0, "D7,D6,E7,E6,D4,D5,E5,E4".split(',')),
+        pmod(1, "F7,F6,H3,H4,G7,G6,H7,H8".split(',')),
+        pmod(2, "L13,L12,L13,L10,K11,K10,K17,K16".split(',')),
+        pmod(3, "J17,J16,J15,J14,J13,J12,J11,J10".split(',')),
+        o("F12", "ftdi_tck"),
+        o("E11", "ftdi_tdo"),
+        o("E12", "ftdi_tdi"),
+        o("E13", "ftdi_tms"),
+        o("E10", "ftdi_sda"),
+        o("F10", "ftdi_scl"),
+        o("B17", "ftdi_txd_uart"),
+        o("A16", "ftdi_rxd_uart"),
+]
+
+# hram, dipsw LVCMOS18
+
+for _, name in seen_stuff:
+    if not name.startswith("hr") and not name.startswith("dipsw"):
+        data.append(["ldc_set_port -iobuf {IO_TYPE=LVCMOS33} [get_ports {%s}]" % name])
+    else:
+        data.append(["ldc_set_port -iobuf {IO_TYPE=LVCMOS18H} [get_ports {%s}]" % name])
+import itertools
+for ln in itertools.chain.from_iterable(data):
+    print(ln)

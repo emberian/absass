@@ -1,0 +1,121 @@
+package absass
+
+import spinal.core._
+import spinal.lib._
+
+class HRam extends Bundle {
+  val cs = in Bool ()
+  val rst = out Bool ()
+  val ckn = out Bool ()
+  val rw = out Bool ()
+  val dq = inout UInt (8 bits)
+}
+
+class Nexass extends Component {
+  val io = new Bundle {
+    val led = out UInt (4 bits)
+    val rgb0 = out UInt (3 bits)
+    val rgb1 = out UInt (3 bits)
+    val dipsw = in UInt (4 bits)
+    val gsrn = in Bool ()
+    val pushbutton0 = in Bool ()
+    val pushbutton1 = in Bool ()
+    // val hr0 = new HRam()
+    // val hr1 = new HRam()
+  }
+
+  noIoPrefix()
+
+  val top = new Area {
+    val hf_base = 450 MHz
+    val osc = new OSC_CORE(16)
+    osc.io.HFOUTEN := False
+    val core_rst = Reg(Bool()) init (False)
+    core_rst.allowUnsetRegToAvoidLatch
+    val core_clk =
+      ClockDomain(osc.io.LFCLKOUT, core_rst, frequency = FixedFrequency(32 kHz))
+  }
+
+  io.rgb0 := 7
+  io.rgb1 := 7
+  io.led := 15
+  val clocked = new ClockingArea(top.core_clk) {
+    val _slow = new SlowArea(2 Hz) {
+      val p = Reg(Bool()) init(False)
+      when(p) {
+        io.led(0) := False
+      }.otherwise {
+        io.led(0) := True
+      }
+      p := !p
+
+      when(io.pushbutton0) {}
+    }
+  }
+  /*
+  val blinky = new ClockingArea(top.core_clk) {
+    // val cpu = new CPU(16, false);
+    val div = Reg(UInt(8 bits))
+    val shift = Reg(UInt(10 bits))
+    val prev_pb0 = Reg(Bool()) init (False)
+    val pwmd = Reg(UInt(10 bits))
+    val act = Reg(Bool()) init (False)
+    val dir = Reg(Bool()) init (False)
+
+    io.led := pwmd(3 downto 0)
+    io.rgb0 := pwmd(6 downto 4)
+    io.rgb1 := pwmd(9 downto 7)
+
+    div := div + 1
+    when(div(0)) {
+      pwmd := 0;
+    }.otherwise {
+      pwmd := shift;
+    }
+    when(div(7)) {
+      when(shift(9)) {
+        dir := True
+      }.otherwise {
+        dir := False
+      }
+
+      when(act) {
+        when(shift === 0) {
+          shift := 1
+        }
+          .otherwise {
+            when(dir) {
+              shift := shift.rotateLeft(1)
+            }.otherwise {
+              shift := shift.rotateRight(1)
+            }
+          }
+        act := False
+      }
+      prev_pb0 := io.pushbutton0
+    }
+
+    when(!io.pushbutton0 && !prev_pb0) {
+      act := True
+    }
+  }*/
+}
+
+class OSC_CORE(val div: Int) extends BlackBox {
+  addGeneric("HF_CLK_DIV", div)
+  addGeneric("HF_OSC_EN", "ENABLED")
+  addGeneric("LF_OUTPUT_EN", "ENABLED")
+
+  val io = new Bundle {
+    val HFCLKOUT = out Bool ()
+    val LFCLKOUT = out Bool ()
+    val HFOUTEN = in Bool ()
+  }
+  noIoPrefix()
+}
+
+object Nexass {
+  def main(args: Array[String]) {
+    SpinalVerilog(new Nexass)
+  }
+}

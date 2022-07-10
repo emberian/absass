@@ -10,7 +10,7 @@ ECPPROG?=ecpprog
 all: $(PROJ).bit
 
 $(PROJ).json: $(PROJ).v $(EXTRA_VERILOG) $(MEM_INIT_FILES) 
-	$(YOSYS) -ql $(PROJ)_syn.log -p "synth_nexus $(SYNTH_ARGS) -top top -json $(PROJ).json" $(PROJ).v $(EXTRA_VERILOG)
+	$(YOSYS) -ql $(PROJ)_syn.log -p "synth_nexus $(SYNTH_ARGS) -top $(PROJ) -json $(PROJ).json" $(PROJ).v $(EXTRA_VERILOG)
 
 $(PROJ).fasm: $(PROJ).json $(PDC)
 	$(NEXTPNR) --device $(DEVICE) --pdc $(PDC) --json $(PROJ).json --fasm $(PROJ).fasm

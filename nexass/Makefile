@@ -1,6 +1,6 @@
-PROJ=nexass
+PROJ=Nexass
 DEVICE=LIFCL-40-8MG289
-PDC=evn.pdc
+PDC=vvml.pdc
 
 include common.mk
 

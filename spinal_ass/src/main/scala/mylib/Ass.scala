@@ -422,13 +422,6 @@ object Icestick {
     SpinalVerilog(new CPU(4, false))
   }
 }
-
-object Nexass {
-  def main(args: Array[String]) {
-    SpinalVerilog(new CPUWrapper(16, true))
-  }
-}
-
 //Generate the MyTopLevel's VHDL
 object MyTopLevelVhdl {
   def main(args: Array[String]) {
