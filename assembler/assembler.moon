@@ -250,6 +250,20 @@ class Assembler
 		return @ok {global: global.val}, s unless loc
 		@ok {global: global.val, local: loc.val}, loc.rest
 
+	p_assn: (s) =>
+		s = @trim s
+		lbl = @p_labelname s
+		return @fail! unless lbl
+		s = @trim lbl.rest
+		return @fail! unless s\sub(1, 1) == "="
+		s = @trim s\sub 2
+		ex = @p_expr s
+		return @die "expected expression", s unless ex
+		@ok {
+			lbl: lbl.val
+			ex: ex.val
+		}, ex.rest
+
 	p_label: (s) =>
 		s = @trim s
 		lbl = @p_labelname s
@@ -299,6 +313,9 @@ class Assembler
 
 	p_insn: (s) =>
 		s = @trim s
+		-- Maybe it's an assignment?
+		assn = @p_assn s
+		return @ok {assn: assn.val}, assn.rest if assn
 		-- Maybe it's a label?
 		lbl = @p_label s
 		return @ok {label: lbl.val}, lbl.rest if lbl
@@ -420,14 +437,17 @@ class Assembler
 	DECL_INSN "SI", (s) =>
 		dst = @p_reg s
 		return @die "expected dest register", s unless dst
-		s = @optcomma dst.rst
+		s = @optcomma dst.rest
 		num = @p_expr s
 		return @die "expected immediate", s unless num
-		return @die "small immediate too large", s unless num < 255
+		ex = @fold num.val
+		return @die "sorry: non-const small immediates are not yet implemented", s unless type(ex) == "number"
+		return @die "small immediate is too big (" .. tonumber(ex) .. ">255)", s if ex > 255
 		@ok {
-			insn: "smalli",
-			dst: dst.val,
-			val: num.val,
+			insn: "smalli"
+			data:
+				dst: dst.val
+				val: ex
 		}, num.rest
 
 	DECL_INSN "BIT", (s) =>
@@ -553,6 +573,8 @@ class Assembler
 
 	DECL_EMIT "sr", (ins) => @e_sr ins.data
 
+	DECL_EMIT "smalli", (ins) => @e_smalli ins.data
+
 	DECL_EMIT "seq", (ins) =>
 		for insn in *ins.data
 			einfo = @@EMITTERS[insn.insn]
@@ -636,6 +658,13 @@ class Assembler
 		if val.label
 			{global: glob, local: loc} = val.label
 			@set_label glob, loc, @origin
+		-- Assignments
+		elseif val.assn
+			{:lbl, :ex} = val.assn
+			{global: glob, local: loc} = lbl
+			ex = @fold ex
+			@set_label glob, loc, ex
+		-- Instructions
 		else
 			einfo = @@EMITTERS[val.insn]
 			error "No emitter for " .. val.insn unless einfo
