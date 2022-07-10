@@ -379,6 +379,9 @@ class CPU(val ws: Int, val fancy: Boolean) extends Module {
             result := pc
             pc := regs.read(sp)
           }
+          is(12) {
+            result := inst(11 downto 4)
+          }
         }
         state := Stages.s_writeback
       }
@@ -402,15 +405,27 @@ class CPU(val ws: Int, val fancy: Boolean) extends Module {
   }
 }
 
+class CPUWrapper(val ws: Int, val fancy: Boolean) extends Module {
+  val io = new Bundle {
+
+  }
+
+  val cpu = new CPU(ws, fancy)
+
+  val mem = Mem(cpu.Word, 256)
+
+  
+}
+
 object Icestick {
   def main(args: Array[String]) {
     SpinalVerilog(new CPU(4, false))
   }
 }
 
-object Crosslink {
+object Nexass {
   def main(args: Array[String]) {
-    SpinalVerilog(new CPU(16, true))
+    SpinalVerilog(new CPUWrapper(16, true))
   }
 }
 
