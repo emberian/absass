@@ -10,6 +10,8 @@ ECPPROG?=ecpprog
 all: $(PROJ).bit
 
 $(PROJ).json: $(PROJ).v $(EXTRA_VERILOG) $(MEM_INIT_FILES) 
+	cp ../spinal_ass/Nexass.v .
+	sed -e '/input\s*clk/d' -e '/input\s*reset/d' -i Nexass.v
 	$(YOSYS) -ql $(PROJ)_syn.log -p "synth_nexus $(SYNTH_ARGS) -top $(PROJ) -json $(PROJ).json" $(PROJ).v $(EXTRA_VERILOG)
 
 $(PROJ).fasm: $(PROJ).json $(PDC)
