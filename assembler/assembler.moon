@@ -106,7 +106,12 @@ class Assembler
 
 	e_smalli: (data) =>
 		{:dst, :val} = data
-		@emit (@@OPCODE.SMALLI | ((val & 0xff)<<4) | (dst & 0xf))
+		num = 0
+		if type(val) == "number"
+			num = val
+		else
+			table.insert @fixups, {emit: 'smalli', where: @origin, ref: val, :dst}
+		@emit (@@OPCODE.SMALLI | ((num & 0xff)<<4) | (dst & 0xf))
 
 	e_comp: (data) =>
 		{:eq, :gt, :sn, :iv, :src, :dst} = data
@@ -441,8 +446,6 @@ class Assembler
 		num = @p_expr s
 		return @die "expected immediate", s unless num
 		ex = @fold num.val
-		return @die "sorry: non-const small immediates are not yet implemented", s unless type(ex) == "number"
-		return @die "small immediate is too big (" .. tonumber(ex) .. ">255)", s if ex > 255
 		@ok {
 			insn: "smalli"
 			data:
@@ -687,6 +690,7 @@ class Assembler
 			switch fix.emit
 				when "word" then @emit_word val
 				when "byte" then @emit_byte val
+				when "smalli" then @e_smalli {dst: fix.dst, :val}
 				else error "Unknown fix type " .. fix.emit
 	
 	info: =>
