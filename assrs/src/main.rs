@@ -83,6 +83,10 @@ pub enum Insn {
         reg: Reg,
         sr: u8,
     },
+    SmallImm {
+        dst: Reg,
+        val: u8,
+    },
     NotSure {
         value: u16,
     },
@@ -138,6 +142,9 @@ impl Insn {
                     | ((*write as u16) << 12)
                     | ((*reg as u16) << 8)
                     | (*sr as u16)
+            },
+            Insn::SmallImm { dst, val } => {
+                (0xc000 << 12) | ((*val as u16) << 4) | (*dst as u16)
             }
             Insn::NotSure {
                 value,
@@ -209,6 +216,14 @@ impl Insn {
                     write: write != 0,
                     reg: reg as Reg,
                     sr: sr as u8,
+                }
+            },
+            0xc000 => {
+                let reg = val & 0xf;
+                let imm = (val & 0x0ff0) >> 4;
+                Insn::SmallImm {
+                    dst: reg as Reg,
+                    val: imm as u8,
                 }
             }
             x => Insn::NotSure { value: x },
@@ -342,6 +357,9 @@ impl Machine {
                     _ => ()
                 }
             }
+            Insn::SmallImm { dst, val } => {
+                self.regs[dst] = val as Word;
+            }
             Insn::NotSure {
                 value,
             } => {
@@ -399,7 +417,7 @@ fn main() {
                 let mut rdr = std::fs::File::open(filename).expect("opening program file");
                 rdr.read_to_end(&mut m.memory);
             } else {
-                std::io::stdin().read_to_end(&mut m.memory);
+                std::io::stdin().read_to_end(&mut m.memory).expect("reading program file");
             }
             m.run();
         },

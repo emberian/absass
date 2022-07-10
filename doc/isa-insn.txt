@@ -19,6 +19,8 @@ Ranges of [a:b] are inclusive of both endpoints (forgive me).
 			4: NMI	5: NS	6: XOR	7: NAND
 			8: AND	9: XNOR	10: S	11: MI
 			12: D	13: CI	14: OR	15: T
+		Note that this value can be treated as a LUT, using bits from D and S
+		as indices into the table number.
 
 - I[15:12] == 0b0010	( ARITHMETIC INSTRUCTIONS )
 	- I[3:0]: (D) Destination Register, LHS (0-15)
@@ -34,7 +36,19 @@ Ranges of [a:b] are inclusive of both endpoints (forgive me).
 		- 7: Mod (D = D % S) *
 		Instructions marked (*) are available only on models with a hardware
 		multiplier (see SR 7).
-		
+
+- I[15:12] == 0b0011	( COMPARISON INSTRUCTIONS )
+	- I[3:0]: (D) Destination Register, LHS (0-15)
+	- I[7:4]: (S) Source Register, RHS (0-15)
+	- I[8]: EQ Flag: True when D = S
+	- I[9]: GT Flag: True when D > S
+	- I[10]: SN Flag: GT respects sign
+	- I[11]: IV FLag: Test is inverted
+		- I[11:8] table: (AB = "above", BL = "below", both unsigned)
+			0: F	1: EQ	2: AB	3: ABE
+			4: F	5: EQ	6: GT	7: GTE
+			8: T	9: NEQ	10: BLE	11: BL
+			12: T	13: NEQ	14: LT	15: LTE
 
 - I[15:14] == 0b01    ( DATA TRANSFER INSTRUCTIONS )
     - I[3:0]: (D) Destination Register, LHS (0-15)
@@ -53,20 +67,6 @@ The _increment mode_ is a two bit value interpreted as:
     - 0b10 - autodecrement: decrement the value of the register by $WORDBYTES before the operation
     - 0b11 - autopostdecrement: decrement the value of the register by $WORDBYTES after the memory operation
 
-
-- I[15:12] == 0b0011	( COMPARISON INSTRUCTIONS )
-	- I[3:0]: (D) Destination Register, LHS (0-15)
-	- I[7:4]: (S) Source Register, RHS (0-15)
-	- I[8]: EQ Flag: True when D = S
-	- I[9]: GT Flag: True when D > S
-	- I[10]: SN Flag: GT respects sign
-	- I[11]: IV FLag: Test is inverted
-		- I[11:8] table: (AB = "above", BL = "below", both unsigned)
-			0: F	1: EQ	2: AB	3: ABE
-			4: F	5: EQ	6: GT	7: GTE
-			8: T	9: NEQ	10: BLE	11: BL
-			12: T	13: NEQ	14: LT	15: LTE
-
 - I[15:12] == 0b1000	( CONDITIONAL INSTRUCTIONS )
 	- I[7:0]: (S) *Signed* Offset (in *Instructions*)
 	- I[11:8]: (C) Comparison Register (0-15)
@@ -77,7 +77,7 @@ The _increment mode_ is a two bit value interpreted as:
 	- I[7:4]: (P) Program Register (read, new PC) (0-15)
 	- I[11:8]: Reserved
 
-- I[15:13] == 0b101		( SYSTEM REGISTERS )
+- I[15:13] == 0b101	( SYSTEM REGISTERS )
 	- I[12]: (W) 1: Write, 0: Read
 	- I[11:8]: (R) Register (0-15)
 	- I[7:0]: (S) System Register (0-255)
@@ -116,3 +116,14 @@ The _increment mode_ is a two bit value interpreted as:
 				- all other bits: reserved
 
 			-S 192-255: Reserved for Vendor Extensions
+
+- I[15:12] == 0b1100 ( SMALL IMMEDIATE )
+    - I[3:0]: (D) Destination Register
+	- I[12:4]: (I) Immediate Value
+	Stores the value in the register.
+
+- I[15:12] == 0b1101 (RESERVED)
+
+- I[15:12] == 0b1110 (RESERVED)
+
+- I[15:12] == 0b1111 (LONG INSTRUCTION)

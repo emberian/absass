@@ -302,6 +302,10 @@ def cpu(addr, data_in, data_out, mode, ready, valid, clk, halt, reset, d_ready, 
                         if write:
                             d_ready.next = True
                             d_out.next = regs[r]
+                elif opcode == 0b1100:
+                    r = inst[4:0]
+                    val = inst[12:4]
+                    regs[r].next = val
                 state.next = CPU_STAGE.WRITEBACK
         elif state == CPU_STAGE.WRITEBACK:
             dl = inst[4:0]

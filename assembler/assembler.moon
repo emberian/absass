@@ -84,6 +84,7 @@ class Assembler
 		COND: 0x8000
 		JAL: 0x9000
 		SR: 0xa000
+		SMALLI: 0xc000
 
 	@ARITH:
 		ADD: 0
@@ -102,6 +103,10 @@ class Assembler
 	e_arith: (data) =>
 		{:op, :src, :dst} = data
 		@emit (@@OPCODE.ARITH | ((op&0x7)<<8) | ((src&0xf)<<4) | (dst&0xf))
+
+	e_smalli: (data) =>
+		{:dst, :val} = data
+		@emit (@@OPCODE.SMALLI | ((val & 0xff)<<4) | (dst & 0xf))
 
 	e_comp: (data) =>
 		{:eq, :gt, :sn, :iv, :src, :dst} = data
@@ -410,6 +415,19 @@ class Assembler
 				},
 				{insn: "word", data: num.val}
 			}
+		}, num.rest
+
+	DECL_INSN "SI", (s) =>
+		dst = @p_reg s
+		return @die "expected dest register", s unless dst
+		s = @optcomma dst.rst
+		num = @p_expr s
+		return @die "expected immediate", s unless num
+		return @die "small immediate too large", s unless num < 255
+		@ok {
+			insn: "smalli",
+			dst: dst.val,
+			val: num.val,
 		}, num.rest
 
 	DECL_INSN "BIT", (s) =>
