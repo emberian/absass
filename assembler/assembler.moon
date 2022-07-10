@@ -12,7 +12,11 @@ class Assembler
 
 	trim: (s) =>
 		start = s\find "%S"
-		return s\sub start if start
+		s = s\sub start if start
+		while true
+			comi, come = s\find "^#.-\n"
+			break unless comi
+			s = s\sub come + 1
 		s
 
 	optcomma: (s) =>
@@ -157,7 +161,7 @@ class Assembler
 		if s\sub(1, 1) == "'"
 			return @die "expected closing quote", s unless s\sub(3, 3) == "'"
 			return @ok s\byte(2), s\sub(4)
-		ixs, ixe = s\find "^[%da-fA-F]+"
+		ixs, ixe = s\find "^[%da-fA-FxX]+"
 		if ixs
 			num = tonumber s\sub ixs, ixe
 			return @ok num, s\sub ixe + 1 if num
