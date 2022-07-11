@@ -353,7 +353,7 @@ class CPU(val ws: Int, val fancy: Boolean) extends Module {
           }
           is(2) {
             arith.io.d := regs.read(dl)
-            arith.io.s := regs.read(sp)
+            arith.io.s := Mux(inst(11), sp, regs.read(sp))
             arith.io.op.assignFromBits(inst(10 downto 8).asBits)
             result := arith.io.res
           }

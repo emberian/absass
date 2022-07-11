@@ -37,6 +37,9 @@ Ranges of [a:b] are inclusive of both endpoints (forgive me).
 		Instructions marked (*) are available only on models with a hardware
 		multiplier (see SR 7).
 
+	If Si is set, then S is taken to be the value to be used for the operation.
+	Otherwise, S is a register number.
+
 - I[15:12] == 0b0011	( COMPARISON INSTRUCTIONS )
 	- I[3:0]: (D) Destination Register, LHS (0-15)
 	- I[7:4]: (S) Source Register, RHS (0-15)

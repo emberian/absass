@@ -1,0 +1,14 @@
+deviations between spec and impl:
+
+
+assembler:
+
+	- Inline ARITH immediates
+
+myhdl & spinal:
+
+	- Subword Instructions
+
+myhdl:
+
+	- Inline ARITH immediates
