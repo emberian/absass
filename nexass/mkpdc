@@ -43,8 +43,8 @@ data = [
         o("E11", "ftdi_tdo"),
         o("E12", "ftdi_tdi"),
         o("E13", "ftdi_tms"),
-        o("E10", "ftdi_sda"),
-        o("F10", "ftdi_scl"),
+        #o("E10", "ftdi_sda"),
+        #o("F10", "ftdi_scl"),
         o("B17", "ftdi_txd_uart"),
         o("A16", "ftdi_rxd_uart"),
 ]

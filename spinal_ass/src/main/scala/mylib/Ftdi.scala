@@ -12,10 +12,8 @@ class Ftdi extends Component {
   }
 
   val ftdi = new Bundle {
-    val tck = in Bool ()
-    val tdi = in Bool ()
-    val tdo = out Bool ()
-    val cs = in Bool ()
+    val txd = out Bool ()
+    val rxd = in Bool ()
   }
 
   val spiclk = new ClockDomain(ftdi.tck, clockDomain.reset, frequency = 6 MHz)
