@@ -60,6 +60,7 @@ pub enum Insn {
     Arith {
         src: Reg,
         dst: Reg,
+        si: bool,
         op: ArithOp,
     },
     Compare {
@@ -98,8 +99,9 @@ impl Insn {
             Insn::Logic { src, dst, op } => {
                 *dst as u16 | ((*src as u16) << 4) | ((*op as u16) << 8) | (0x1 << 12)
             }
-            Insn::Arith { src, dst, op } => {
-                *dst as u16 | ((*src as u16) << 4) | ((*op as u16) << 8) | (0x2 << 12)
+            Insn::Arith { src, dst, si, op } => {
+                let si = if *si { 1 << 11 } else { 0 };
+                *dst as u16 | ((*src as u16) << 4) | ((*op as u16) << 8) | si | (0x2 << 12)
             }
             Insn::Compare {
                 src,
@@ -169,10 +171,12 @@ impl Insn {
             0x2000 => {
                 let src = (val & 0xf0) >> 4;
                 let dst = val & 0xf;
-                let op = (val & 0xf00) >> 8;
+                let op = (val & 0x700) >> 8;
+                let si = (val & 0x800);
                 Insn::Arith {
                     src: src as Reg,
                     dst: dst as Reg,
+                    si: si != 0,
                     op: ArithOp::from_u8(op as u8),
                 }
             }
@@ -231,10 +235,13 @@ impl Insn {
     }
 }
 
+#[derive(Default)]
 pub struct Machine {
     regs: [Word; 16],
     memory: Vec<u8>,
     ivt: Reg,
+    cycles: Word,
+    insns: Word,
 }
 
 #[derive(Debug, Hash, Clone, Copy)]
@@ -243,7 +250,15 @@ pub enum StepOut {
     Halt,
 }
 
+#[repr(usize)]
+#[derive(Debug, Hash, Clone, Copy)]
+pub enum Extension {
+    Multiplier = 1,
+}
+
 impl Machine {
+    pub const FREQ: Word = 0xa55;
+
     pub fn pc(&self) -> usize { self.regs[0] as usize }
 
     pub fn step(&mut self, i: Insn) -> StepOut {
@@ -261,17 +276,18 @@ impl Machine {
                 }
                 self.regs[dst] = res;
             }
-            Insn::Arith { src, dst, op } => {
+            Insn::Arith { src, dst, si, op } => {
+                let src = if si { src as Word } else { self.regs[src] };
                 self.regs[dst] = match op {
-                    ArithOp::Add => self.regs[dst].wrapping_add(self.regs[src]),
+                    ArithOp::Add => self.regs[dst].wrapping_add(src),
                     // make the rest of the code wrapping
-                    ArithOp::Sub => self.regs[dst].wrapping_sub(self.regs[src]),
-                    ArithOp::Shl => self.regs[dst] << self.regs[src],
-                    ArithOp::Shr => self.regs[dst] >> self.regs[src],
-                    ArithOp::Asr => ((self.regs[dst] as i64) >> self.regs[src]) as Word,
-                    ArithOp::Mul => self.regs[dst].wrapping_mul(self.regs[src]),
-                    ArithOp::Div => self.regs[dst] / self.regs[src],
-                    ArithOp::Mod => self.regs[dst] % self.regs[src],
+                    ArithOp::Sub => self.regs[dst].wrapping_sub(src),
+                    ArithOp::Shl => self.regs[dst] << src,
+                    ArithOp::Shr => self.regs[dst] >> src,
+                    ArithOp::Asr => ((self.regs[dst] as i64) >> src) as Word,
+                    ArithOp::Mul => self.regs[dst].wrapping_mul(src),
+                    ArithOp::Div => self.regs[dst] / src,
+                    ArithOp::Mod => self.regs[dst] % src,
                 };
             }
             Insn::Compare {
@@ -338,6 +354,8 @@ impl Machine {
                     _ => ()
                 }
 
+                self.cycles += 1;
+                self.insns += 1;
                 return Continue;
             }
             Insn::SysReg {
@@ -354,6 +372,19 @@ impl Machine {
                         self.regs[reg] = self.ivt as Word;
                     }
                     3 => { return Halt; }
+                    4 => if write {
+                        self.insns = self.regs[reg];
+                    } else {
+                        self.regs[reg] = self.insns;
+                    }
+                    5 => if write {
+                        self.cycles = self.regs[reg];
+                    } else {
+                        self.regs[reg] = self.cycles;
+                    }
+                    6 => if !write { self.regs[reg] = Self::FREQ; }
+                    7 => if !write { self.regs[reg] = Extension::Multiplier as Word; }
+                    10 => if write { println!("{}", char::from_u32(self.regs[reg] as u32).unwrap_or('?')); }
                     _ => ()
                 }
             }
@@ -368,6 +399,8 @@ impl Machine {
         }
 
         self.regs[0] = pc as Word;
+        self.cycles += 1;
+        self.insns += 1;
         Continue
     }
 
@@ -384,11 +417,8 @@ impl Machine {
 pub fn main() {
     match std::env::args().nth(1).as_deref() {
         Some("test") => {
-            let mut m = Machine {
-                regs: [0; 16],
-                memory: vec![0; 0x10000],
-                ivt: 0,
-            };
+            let mut m = Machine::default();
+            m.memory = vec![0u8; 0x10000];
             m.step(Insn::Logic {
                 src: 1,
                 dst: 1,
@@ -408,11 +438,7 @@ pub fn main() {
             assert_eq!(m.memory[0x8 as usize], 0xff);
         },
         Some("run") => {
-            let mut m = Machine {
-                regs: [0; 16],
-                memory: Vec::new(),
-                ivt: 0,
-            };
+            let mut m = Machine::default();
             if let Some(filename) = std::env::args().nth(2) {
                 let mut rdr = std::fs::File::open(filename).expect("opening program file");
                 rdr.read_to_end(&mut m.memory);
