@@ -28,12 +28,16 @@ class Nexass extends Component {
 
   val top = new Area {
     val hf_base = 450 MHz
-    val osc = new OSC_CORE(16)
-    osc.io.HFOUTEN := False
+    val osc = new OSC_CORE(1)
+    osc.io.HFOUTEN := True
     val core_rst = Reg(Bool()) init (False)
     core_rst.allowUnsetRegToAvoidLatch
     val core_clk =
-      ClockDomain(osc.io.LFCLKOUT, core_rst, frequency = FixedFrequency(32 kHz))
+      ClockDomain(
+        osc.io.HFCLKOUT,
+        core_rst,
+        frequency = FixedFrequency(450 MHz)
+      )
   }
 
   io.rgb0 := 7
@@ -41,16 +45,17 @@ class Nexass extends Component {
   io.led := 15
   val clocked = new ClockingArea(top.core_clk) {
     val _slow = new SlowArea(2 Hz) {
-      val p = Reg(Bool()) init(False)
-      when(p) {
-        io.led(0) := False
-      }.otherwise {
-        io.led(0) := True
-      }
+      val p = Reg(Bool()) init (False)
+      io.led(0) := p
       p := !p
 
-      when(io.pushbutton0) {}
+      io.led(1) := io.pushbutton0
+
+      io.led(2) := !p
+
+      io.led(3) := io.pushbutton1
     }
+
   }
   /*
   val blinky = new ClockingArea(top.core_clk) {

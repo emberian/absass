@@ -1,0 +1,22 @@
+every ass needs to fart sometimes. memory-mapped io is ideal for this.
+
+when this ass needs to print text, it uses a device called TEXT0.
+consult the isa reference for which system register to access to
+retrieve the address of TEXT0. memory operations on TEXT0 have
+the following semantics:
+
+TEXT0[0]: opcode. read == 0, write == 1
+TEXT0[1]: length in bytes
+TEXT0[2]: pointer
+TEXT0[3]: status. bit 0 = busy, bit 1 = transaction pending
+
+When TEXT0[0] is written to, the other fields are read and a transaction 
+is initiated and the busy bit is set.
+
+If a transaction is already in progress, the pending bit will be set 
+and the request is ignored.
+
+After the transaction is complete, bit 0 will be cleared.
+It is the responsibility of the user code to wait for the
+busy bit to become 0 and re-submit the opcode if the
+pending bit is set, and clear it.

@@ -11,8 +11,8 @@ C syntax is used in explications; familiarity with it is assumed.
 Ranges of [a:b] are inclusive of both endpoints (forgive me).
 
 - I[15:12] == 0b0001   ( BITWISE INSTRUCTIONS )
-	- I[3:0]: (D) Destination Register, LHS (0-15) 
-	- I[7:4]: (S) Source Register, RHS (0-15)
+	- I[3:0]:  (D) Destination Register, LHS (0-15)
+	- I[7:4]:  (S) Source Register, RHS (0-15)
 	- I[11:8]: (M) Truth Table Number (0-15)
 		- cf. https://en.wikipedia.org/wiki/Truth_table#Binary_operations
 			0: F    1: NOR  2: NCI  3: ND
@@ -23,8 +23,9 @@ Ranges of [a:b] are inclusive of both endpoints (forgive me).
 		as indices into the table number.
 
 - I[15:12] == 0b0010	( ARITHMETIC INSTRUCTIONS )
-	- I[3:0]: (D) Destination Register, LHS (0-15)
-	- I[7:4]: (S) Source Register, RHS (0-15)
+	- I[3:0]:  (D) Destination Register, LHS (0-15)
+	- I[7:4]:  (S) Source Register, RHS (0-15)
+	- I[11]:   (Si) Source Immediate
 	- I[10:8]: (M) Operation Number (0-7)
 		- 0: Add (D = D + S)
 		- 1: Sub (D = D - S)
@@ -43,10 +44,10 @@ Ranges of [a:b] are inclusive of both endpoints (forgive me).
 - I[15:12] == 0b0011	( COMPARISON INSTRUCTIONS )
 	- I[3:0]: (D) Destination Register, LHS (0-15)
 	- I[7:4]: (S) Source Register, RHS (0-15)
-	- I[8]: EQ Flag: True when D = S
-	- I[9]: GT Flag: True when D > S
-	- I[10]: SN Flag: GT respects sign
-	- I[11]: IV FLag: Test is inverted
+	- I[8]:   EQ Flag: True when D = S
+	- I[9]:   GT Flag: True when D > S
+	- I[10]:  SN Flag: GT respects sign
+	- I[11]:  IV FLag: Test is inverted
 		- I[11:8] table: (AB = "above", BL = "below", both unsigned)
 			0: F	1: EQ	2: AB	3: ABE
 			4: F	5: EQ	6: GT	7: GTE
@@ -57,7 +58,7 @@ Ranges of [a:b] are inclusive of both endpoints (forgive me).
     - I[3:0]: (D) Destination Register, LHS (0-15)
     - I[7:4]: (S) Source Register, RHS (0-15)
     - I[10]: (Dm) Destination indirect
-    - I[9:8]: (Da) Destination increment mode 
+    - I[9:8]: (Da) Destination increment mode
     - I[13]: (Sm) Source indirect
     - I[12:11]: (Sa) Source increment mode
 
@@ -75,10 +76,39 @@ The _increment mode_ is a two bit value interpreted as:
 	- I[11:8]: (C) Comparison Register (0-15)
 		- Condition is passed if reg is nonzero
 
-- I[15:12] == 0b1001	( JUMP AND LINK )
+- I[15:11] == 0b10010	( JUMP AND LINK )
 	- I[3:0]: (L) Link Register (written, next PC) (0-15)
 	- I[7:4]: (P) Program Register (read, new PC) (0-15)
-	- I[11:8]: Reserved
+	- I[10:8]: Reserved
+
+- I[15:11] == 0b10011  ( SUBWORD OPERATIONS  )
+	- I[3:0]:  (D) Destination Register (0-15)
+	- I[7:4]:  (Swi) Subword Index Register (0-15)
+	- I[10:8]: (Sws) Subword Size (0-7)
+
+	When Sws == 0, size is considered to be 8.
+
+	Equivalent to the following sequence of code,
+	which moves the Sws bytes starting at the
+	Swith byte from the most insignificant byte.
+
+	#if (Sws == 0)
+	#define Sws 8
+	#endif
+	XF *-SP, T0
+	XF *-SP, T1
+	SI T0, Sws*8
+	SI T1, 1
+	SHL T1, T0
+	SUB T1, 1
+	MUL Swi, 8
+	SI T0, 8*Swi
+	SHL T1, T0
+	# T1 = ((1<<(Sws * 8)) - 1) << (8*Swi)
+	AND D, T1
+	SHR D, T0
+	XF T1, *SP+
+	XF T0, *SP+
 
 - I[15:13] == 0b101	( SYSTEM REGISTERS )
 	- I[12]: (W) 1: Write, 0: Read
