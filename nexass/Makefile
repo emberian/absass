@@ -11,8 +11,8 @@ ECPPROG?=ecpprog
 
 all: $(PROJ).bit
 
-$(PROJ).json: $(PROJ).v $(EXTRA_VERILOG) $(MEM_INIT_FILES)
-	(cd ../spinal_ass && sbt 'runMain absass.Nexass')
+$(PROJ).json: ../spinal_ass/Nexass.v $(PROJ).v $(EXTRA_VERILOG) $(MEM_INIT_FILES)
+	#(cd ../spinal_ass && sbt 'runMain absass.Nexass')
 	cp ../spinal_ass/Nexass.v .
 	sed -e '/input\s*clk/d' -e '/input\s*reset/d' -i Nexass.v
 	$(YOSYS) -ql $(PROJ)_syn.log -p "synth_nexus $(SYNTH_ARGS) -top $(PROJ) -json $(PROJ).json" $(PROJ).v $(EXTRA_VERILOG)
@@ -33,4 +33,4 @@ clean:
 	rm -f $(PROJ).json $(PROJ).fasm $(PROJ)_syn.log $(PROJ).bit
 
 .SECONDARY:
-.PHONY: prog prog-flash clean $(PROJ).json
+.PHONY: prog prog-flash clean

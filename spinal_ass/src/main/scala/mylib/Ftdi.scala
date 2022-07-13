@@ -9,14 +9,11 @@ class Ftdi(val fifo_sz: Int) extends Component {
   val io = new Bundle {
     val rd = master Stream (Byte)
     val wr = slave Stream (Byte)
-  }
-
-  val ftdi = new Bundle {
     val txd = out Bool ()
     val rxd = in Bool ()
   }
 
-  ftdi.txd.assignDontCare()
+  io.txd := True // active low
 
   val baud = 9600 Hz
 
@@ -56,7 +53,7 @@ class Ftdi(val fifo_sz: Int) extends Component {
     val rdctr = Reg(UInt(log2Up(factor) bits)) init (0)
     val wrctr = Reg(UInt(log2Up(factor) bits)) init (0)
     // we thus sample in the middle of the baud period
-    when(!ftdi.rxd && sync_clk) {
+    when(!io.rxd && sync_clk) {
       rdctr := factor / 2
       rxClk := False
     } otherwise {
@@ -78,7 +75,7 @@ class Ftdi(val fifo_sz: Int) extends Component {
 
       val idle: State = new State with EntryPoint {
         whenIsActive {
-          when(!ftdi.rxd) {
+          when(!io.rxd) {
             goto(rd)
           }
         }
@@ -90,7 +87,7 @@ class Ftdi(val fifo_sz: Int) extends Component {
         onExit { sync_clk := True }
         whenIsActive {
           bits_recvd := bits_recvd + 1
-          recvbf(7) := ftdi.rxd
+          recvbf(7) := io.rxd
           recvbf(6 downto 0) := recvbf(7 downto 1)
 
           when(bits_recvd === 7) {
@@ -127,7 +124,7 @@ class Ftdi(val fifo_sz: Int) extends Component {
           bits_sent := 0
         }
         whenIsActive {
-          ftdi.txd := dataw(0)
+          io.txd := dataw(0)
           dataw(6 downto 0) := dataw(7 downto 1)
           bits_sent := bits_sent + 1
           when(bits_sent === 9) {

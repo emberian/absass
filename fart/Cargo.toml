@@ -1,0 +1,10 @@
+[package]
+name = "fart"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+ftdi = { git = "https://github.com/tanriol/ftdi-rs" }
+rand = "*"

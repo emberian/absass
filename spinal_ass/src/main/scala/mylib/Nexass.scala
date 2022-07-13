@@ -20,40 +20,57 @@ class Nexass extends Component {
     val gsrn = in Bool ()
     val pushbutton0 = in Bool ()
     val pushbutton1 = in Bool ()
+    val ftdi_txd_uart = out Bool ()
+    val ftdi_rxd_uart = in Bool ()
     // val hr0 = new HRam()
     // val hr1 = new HRam()
   }
 
   noIoPrefix()
 
+  val core_rst = False
+
   val top = new Area {
-    val hf_base = 450 MHz
     val osc = new OSC_CORE(1)
     osc.io.HFOUTEN := True
-    val core_rst = Reg(Bool()) init (False)
-    core_rst.allowUnsetRegToAvoidLatch
     val core_clk =
       ClockDomain(
         osc.io.HFCLKOUT,
         core_rst,
-        frequency = FixedFrequency(450 MHz)
+        frequency = FixedFrequency(240.79 MHz)
       )
   }
 
-  io.rgb0 := 7
-  io.rgb1 := 7
   io.led := 15
+
   val clocked = new ClockingArea(top.core_clk) {
+
+    val ctr = Reg(UInt(3 bits))
+    io.rgb0 := ctr
+    io.rgb1 := 0
+
+    val ftdi = new Ftdi(2)
+
+    ftdi.io.rxd := io.ftdi_rxd_uart
+    io.ftdi_txd_uart := ftdi.io.txd
+
+    ftdi.io.wr << ftdi.io.rd
+
+    new SlowArea(8 Hz) {
+      ctr := ctr + 1
+    }
+
     val _slow = new SlowArea(2 Hz) {
       val p = Reg(Bool()) init (False)
       io.led(0) := p
+
       p := !p
 
-      io.led(1) := io.pushbutton0
+      io.led(1) := !ftdi.io.rd.valid
 
-      io.led(2) := !p
+      io.led(2) := io.ftdi_rxd_uart
 
-      io.led(3) := io.pushbutton1
+      io.led(3) := io.ftdi_txd_uart
     }
 
   }
