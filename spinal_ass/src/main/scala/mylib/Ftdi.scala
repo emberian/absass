@@ -125,7 +125,7 @@ class Ftdi(val fifo_sz: Int) extends Component {
         }
         whenIsActive {
           io.txd := dataw(0)
-          dataw(6 downto 0) := dataw(7 downto 1)
+          dataw(8 downto 0) := dataw(9 downto 1)
           bits_sent := bits_sent + 1
           when(bits_sent === 9) {
             goto(idle)

@@ -47,14 +47,12 @@ fn main() {
             reply.clear();
         }
 
-        loop{
         let mut rd = [0u8; 1920];
         rd.try_fill(&mut rand::thread_rng()).unwrap();
         device.write_all(&rd).unwrap();
         device.read_to_end(&mut reply).unwrap();
         if reply != rd {
             random_failed = true;
-        }
         }
 
         if shitty || failed_ping || fucked_up.len() != 0 || random_failed {

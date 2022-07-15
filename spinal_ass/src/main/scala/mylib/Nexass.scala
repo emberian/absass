@@ -56,21 +56,25 @@ class Nexass extends Component {
 
     ftdi.io.wr << ftdi.io.rd
 
+    //ftdi.io.wr.valid := True
+    //ftdi.io.wr.payload := 165
+
+    //ftdi.io.rd.ready := False
+
     new SlowArea(8 Hz) {
       ctr := ctr + 1
     }
 
-    val _slow = new SlowArea(2 Hz) {
+    val _slow = new Area {
       val p = Reg(Bool()) init (False)
+      p := False
       io.led(0) := p
 
-      p := !p
+      io.led(1) := !p
 
-      io.led(1) := !ftdi.io.rd.valid
+      io.led(2) := ftdi.io.txd
 
-      io.led(2) := io.ftdi_rxd_uart
-
-      io.led(3) := io.ftdi_txd_uart
+      io.led(3) := ftdi.io.rxd
     }
 
   }
