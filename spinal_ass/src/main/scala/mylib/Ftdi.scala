@@ -3,6 +3,9 @@ package absass
 import spinal.core._
 import spinal.lib._
 import spinal.lib.fsm._
+import spinal.sim._
+import spinal.core.sim._
+import scala.util.Random
 
 class Ftdi(val fifo_sz: Int) extends Component {
   val Byte = UInt(8 bits)
@@ -13,12 +16,18 @@ class Ftdi(val fifo_sz: Int) extends Component {
     val rxd = in Bool ()
   }
 
+  val dbg = new Bundle {
+    val baudClk = out Bool ()
+  }
+
   io.txd := True // active low
 
   val baud = 9600 Hz
 
   val baudClk = RegInit(False)
   val rxClk = RegInit(False)
+
+  dbg.baudClk := baudClk
 
   val baudDom = ClockDomain(baudClk, clockDomain.reset)
   val rDom = ClockDomain(rxClk, clockDomain.reset)
@@ -48,7 +57,9 @@ class Ftdi(val fifo_sz: Int) extends Component {
 
   val rctl = new Area {
     val currentFreq = ClockDomain.current.frequency.getValue.toBigDecimal
+    val baudCtr = Reg(UInt(16 bits)) init (0)
     val factor = (currentFreq / (2 * baud.toBigDecimal)).toInt
+    println(f"it takes $factor cycles to toggle the clock")
     // multiply by two to ensure one edge per baud
     val rdctr = Reg(UInt(log2Up(factor) bits)) init (0)
     val wrctr = Reg(UInt(log2Up(factor) bits)) init (0)
@@ -59,8 +70,9 @@ class Ftdi(val fifo_sz: Int) extends Component {
     } otherwise {
       rdctr := rdctr + 1
     }
+    wrctr := wrctr + 1
     when(rdctr === factor - 1) { rxClk := !rxClk; rdctr := 0 }
-    when(wrctr === factor - 1) { baudClk := !baudClk; wrctr := 0 }
+    when(wrctr === factor - 1) { baudClk := !baudClk; wrctr := 0 ; baudCtr := baudCtr + 1 }
   }
 
   val rxar = new ClockingArea(rDom) {
@@ -136,12 +148,50 @@ class Ftdi(val fifo_sz: Int) extends Component {
   }
 }
 
+object FtdiSim {
+  def main(args: Array[String]) {
+    SimConfig.withWave
+      .withConfig(
+        SpinalConfig(
+          defaultClockDomainFrequency = FixedFrequency(50 MHz)
+        )
+      )
+      .doSim(new Ftdi(2)) { ftdi =>
+        ftdi.clockDomain.forkStimulus(period = 20)
+        for (_ <- 0 until 10) {
+          ftdi.clockDomain.waitRisingEdge()
+          val r = Random.nextInt(256)
+          println(f"uat($r)")
+          ftdi.io.wr.payload #= r
+          ftdi.io.wr.valid #= true
+          assert(ftdi.io.wr.ready.toBoolean)
+          ftdi.clockDomain.waitRisingEdge()
+          ftdi.io.wr.valid #= false
+          println("waiting tx low")
+          waitUntil(!ftdi.io.txd.toBoolean)
+          println("waiting baudclk low")
+          waitUntil(!ftdi.dbg.baudClk.toBoolean)
+          var data = 0
+          for (i <- 7 downto 0) {
+            println("waiting baudclk high")
+            waitUntil(ftdi.dbg.baudClk.toBoolean)
+            data = data | (ftdi.io.txd.toBoolean.toInt << i)
+            println("waiting baduclk toggle")
+            waitUntil(!ftdi.dbg.baudClk.toBoolean)
+          }
+          println(f"$data == $r ?")
+          assert(data == r)
+        }
+      }
+  }
+}
+
 object FtdiV {
   def main(args: Array[String]) {
     SpinalConfig(
       mode = Verilog,
       defaultClockDomainFrequency = FixedFrequency(450 MHz)
     )
-      .generate(new Ftdi(2))
+      .generate(new Ftdi(3))
   }
 }

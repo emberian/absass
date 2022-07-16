@@ -172,7 +172,7 @@ impl Insn {
                 let src = (val & 0xf0) >> 4;
                 let dst = val & 0xf;
                 let op = (val & 0x700) >> 8;
-                let si = (val & 0x800);
+                let si = val & 0x800;
                 Insn::Arith {
                     src: src as Reg,
                     dst: dst as Reg,

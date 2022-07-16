@@ -234,16 +234,18 @@ object ComparisonSim {
 object CPUSim {
   def main(args: Array[String]) {
     SimConfig.withWave.doSim(new CPU(8, true)) { cpu =>
+      cpu.clockDomain.forkStimulus(period = 10)
+
       def exec_insn(c: CPU, i: Int) = {
         assert(c.io.insn_content.ready == 1)
         c.io.insn_content.payload #= i
         c.io.insn_content.valid #= true
         c.clockDomain.waitRisingEdge()
         c.io.insn_content.valid #= true
-        while (c.dbg.cur_stage != 1) { c.clockDomain.waitRisingEdge() }
+        waitUntil(c.dbg.cur_stage == 1)
       }
       def pc(c: CPU): BigInt = {
-        assert(c.io.insn_addr.valid == 1)
+        //assert(c.io.insn_addr.valid == 1)
         c.io.insn_addr.payload.toBigInt
       }
 
@@ -270,5 +272,6 @@ object TestAll {
     ArithSim.main(args)
     ComparisonSim.main(args)
     CPUSim.main(args)
+    FtdiSim.main(args)
   }
 }

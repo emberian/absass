@@ -47,6 +47,8 @@ data = [
         #o("F10", "ftdi_scl"),
         o("B17", "ftdi_txd_uart"),
         o("A16", "ftdi_rxd_uart"),
+        o("C2", "fx_txd_uart"),
+        o("D5", "fx_rxd_uart"),
 ]
 
 # hram, dipsw LVCMOS18
