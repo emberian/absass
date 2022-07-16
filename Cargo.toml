@@ -1,3 +1,7 @@
 [workspace]
-members = ["assrs", "fart"]
+members = [
+	"assrs",
+	"assc",
+	"fart",
+]
 

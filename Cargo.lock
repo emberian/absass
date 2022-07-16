@@ -3,6 +3,14 @@
 version = 3
 
 [[package]]
+name = "assc"
+version = "0.1.0"
+dependencies = [
+ "pest",
+ "pest_derive",
+]
+
+[[package]]
 name = "assrs"
 version = "0.1.0"
 
