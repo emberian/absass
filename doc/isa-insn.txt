@@ -148,6 +148,9 @@ The _increment mode_ is a two bit value interpreted as:
 				- bit 0: Hardware multiplier
 				- all other bits: reserved
 
+			- S 10: Unofficial Debug Output Port
+				- writes a byte to stdout of most simulators
+
 			-S 192-255: Reserved for Vendor Extensions
 
 - I[15:12] == 0b1100 ( SMALL IMMEDIATE )
