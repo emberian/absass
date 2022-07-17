@@ -1,0 +1,85 @@
+WHITESPACE = _{ " " | "\n" | "\t" }
+
+COMMENT = _{ line_comment | block_comment }
+	line_comment = { "//" ~ (!"\n" ~ ANY)* }
+	block_comment = { "/*" ~ (!"*/" ~ ANY)* ~ "*/" }
+
+toplevel = _{ SOI ~ program ~ EOI }
+
+program = { expression }
+
+expression = _{ logic_or }
+
+logic_or = {
+	logic_and ~ (op_logic_or ~ logic_and)*
+}
+	op_logic_or = { "||" }
+
+logic_and = {
+	rel_eq ~ (op_logic_and ~ rel_eq)*
+}
+	op_logic_and = { "&&" }
+
+rel_eq = {
+	rel_ineq ~ ((op_eq | op_neq) ~ rel_ineq)*
+}
+	op_eq = { "==" }
+	op_neq = { "!=" }
+
+rel_ineq = {
+	bit_or ~ ((op_lt | op_gt | op_le | op_ge) ~ bit_or)*
+}
+	op_lt = { "<" }
+	op_gt = { ">" }
+	op_le = { "<=" }
+	op_ge = { ">=" }
+
+bit_or = {
+	bit_and ~ ((op_or | op_xor) ~ bit_and)*
+}
+	op_or = { "|" }
+	op_xor = { "^" }
+
+bit_and = {
+	arith_term ~ ((op_and | op_lsh | op_rsh) ~ arith_term)*
+}
+	op_and = { "&" }
+	op_lsh = { "<<" }
+	op_rsh = { ">>" }
+
+arith_term = {
+	arith_factor ~ ((op_add | op_sub) ~ arith_factor)*
+}
+	op_add = { "+" }
+	op_sub = { "-" }
+
+arith_factor = {
+	unary ~ ((op_mul | op_div | op_mod) ~ unary)*
+}
+	op_mul = { "*" }
+	op_div = { "/" }
+	op_mod = { "%" }
+
+unary = {
+	unary_op* ~ atom
+}
+	unary_op = _{ op_ident | op_neg | op_not | op_cmp }
+		op_ident = { "+" }
+		op_neg = { "-" }
+		op_not = { "!" }
+		op_cmp = { "~" }
+
+atom = _{ literal | ident | "(" ~ expression ~ ")" }
+
+literal = { lit_float | lit_int }
+	lit_int = { lit_hex | lit_oct | lit_bin | lit_dec }
+		lit_hex = @{ "0x" ~ ASCII_HEX_DIGIT+ }
+		lit_oct = @{ "0o" ~ ASCII_OCT_DIGIT+ }
+		lit_bin = @{ "0b" ~ ASCII_BIN_DIGIT+ }
+		lit_dec = @{ ASCII_DIGIT+ }
+	lit_float = @{
+		ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT* ~
+		(^"e" ~ ("+" | "-")? ~ ASCII_DIGIT+)?
+	}
+
+ident = { XID_START ~ XID_CONTINUE* }
