@@ -7,7 +7,7 @@ from random import randrange
 
 from myhdl import block, always_comb, always_seq, always, \
         Signal, ResetSignal, intbv, modbv, delay, instance, \
-        now, enum, bin
+        now, enum, bin, traceSignals
 
 SUBDIR = 'verilog'
 os.makedirs(SUBDIR, exist_ok = True)
@@ -587,7 +587,7 @@ def cpu_test(w, _ignored=0):
     debug_ready = Signal(False)
     debug_out = Signal(modbv(0)[w:])
 
-    cpu_unit = cpu(addr, data_to_cpu, data_to_ram, mode, ready, valid, clk, halt, reset, debug_ready, debug_out, 2)
+    cpu_unit = traceSignals(cpu(addr, data_to_cpu, data_to_ram, mode, ready, valid, clk, halt, reset, debug_ready, debug_out, 2))
     try_convert(cpu_unit)
     mem = cpu_ram(
             open('../assembler/hello.bin', 'rb').read(),
