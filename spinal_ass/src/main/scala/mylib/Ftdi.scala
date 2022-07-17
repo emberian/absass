@@ -18,10 +18,11 @@ class Ftdi(val fifo_sz: Int) extends Component {
 
   val dbg = new Bundle {
     val baudClk = out Bool ()
+    val noticeMeSenpai = in Bool ()
   }
 
   io.txd := True // active low
-
+  io.wr.ready := False
   val baud = 9600 Hz
 
   val baudClk = RegInit(False)
@@ -29,29 +30,14 @@ class Ftdi(val fifo_sz: Int) extends Component {
 
   dbg.baudClk := baudClk
 
-  val baudDom = ClockDomain(baudClk, clockDomain.reset)
-  val rDom = ClockDomain(rxClk, clockDomain.reset)
-
-  val rdfifo = StreamFifoCC(
+  val rdfifo = StreamFifo(
     dataType = Byte,
-    depth = fifo_sz,
-    pushClock = rDom,
-    popClock = clockDomain
+    depth = fifo_sz
   )
   rdfifo.io.push.valid := False
   rdfifo.io.push.payload.assignDontCare()
 
-  val wrfifo = StreamFifoCC(
-    dataType = Byte,
-    depth = fifo_sz,
-    pushClock = clockDomain,
-    popClock = baudDom
-  )
-
-  wrfifo.io.pop.ready := False
-
   rdfifo.io.pop >> io.rd
-  wrfifo.io.push << io.wr
 
   val sync_clk = Reg(Bool()) init (False) addTag (crossClockDomain)
 
@@ -72,10 +58,12 @@ class Ftdi(val fifo_sz: Int) extends Component {
     }
     wrctr := wrctr + 1
     when(rdctr === factor - 1) { rxClk := !rxClk; rdctr := 0 }
-    when(wrctr === factor - 1) { baudClk := !baudClk; wrctr := 0 ; baudCtr := baudCtr + 1 }
+    when(wrctr === factor - 1) {
+      baudClk := !baudClk; wrctr := 0; baudCtr := baudCtr + 1
+    }
   }
 
-  val rxar = new ClockingArea(rDom) {
+  val rxar = new Area {
     val sent = RegInit(False)
     when(rdfifo.io.push.ready && sent) {
       rdfifo.io.push.valid := False; sent := False
@@ -98,49 +86,59 @@ class Ftdi(val fifo_sz: Int) extends Component {
         onEntry { bits_recvd := 0 }
         onExit { sync_clk := True }
         whenIsActive {
-          bits_recvd := bits_recvd + 1
-          recvbf(7) := io.rxd
-          recvbf(6 downto 0) := recvbf(7 downto 1)
+          when(rxClk.rise) {
+            bits_recvd := bits_recvd + 1
+            recvbf(7) := io.rxd
+            recvbf(6 downto 0) := recvbf(7 downto 1)
 
-          when(bits_recvd === 7) {
-            rdfifo.io.push.valid := True
-            sent := True
-            // what does a stall do? if sent = true, we stalled.
-            rdfifo.io.push.payload := recvbf
-            goto(idle)
+            when(bits_recvd === 7) {
+              rdfifo.io.push.valid := True
+              sent := True
+              // what does a stall do? if sent = true, we stalled.
+              rdfifo.io.push.payload := recvbf
+              goto(idle)
+            }
           }
         }
       }
     }
   }
 
-  val txar = new ClockingArea(baudDom) {
+  val txar = new Area {
     val tx = new StateMachine {
       val bits_sent = Reg(UInt(4 bits)) init (0)
       val dataw = Reg(UInt(10 bits)) init (0)
 
       val idle: State = new State with EntryPoint {
-        onEntry { wrfifo.io.pop.ready := True }
+        onEntry { io.wr.ready := True }
 
         whenIsActive {
-          when(wrfifo.io.pop.valid) { goto(wr) }
+          when(io.wr.valid) { goto(wr) }
         }
-        onExit { wrfifo.io.pop.ready := False }
+        onExit { io.wr.ready := False }
       }
 
       val wr = new State {
+        val latest_bit = Reg(Bool) init (False)
         onEntry {
           dataw(0) := False
+          latest_bit := True // line kept high when not in use
           dataw(9) := True
-          dataw(8 downto 1) := wrfifo.io.pop.payload
+          dataw(8 downto 1) := io.wr.payload
           bits_sent := 0
         }
         whenIsActive {
-          io.txd := dataw(0)
-          dataw(8 downto 0) := dataw(9 downto 1)
-          bits_sent := bits_sent + 1
-          when(bits_sent === 9) {
-            goto(idle)
+          when(baudClk.rise) {
+            latest_bit := dataw(0)
+            io.txd := dataw(0)
+            dataw(8 downto 0) := dataw(9 downto 1)
+            dataw(9) := False // so the wave readout is nicer
+            bits_sent := bits_sent + 1
+            when(bits_sent === 9) {
+              goto(idle)
+            }
+          } otherwise {
+            io.txd := latest_bit
           }
         }
       }
@@ -153,18 +151,20 @@ object FtdiSim {
     SimConfig.withWave
       .withConfig(
         SpinalConfig(
-          defaultClockDomainFrequency = FixedFrequency(50 MHz)
+          defaultClockDomainFrequency = FixedFrequency(0.5 MHz)
         )
       )
       .doSim(new Ftdi(2)) { ftdi =>
-        ftdi.clockDomain.forkStimulus(period = 20)
+        ftdi.clockDomain.forkStimulus(period = 2000)
         for (_ <- 0 until 10) {
+          ftdi.dbg.noticeMeSenpai #= false
+
           ftdi.clockDomain.waitRisingEdge()
-          val r = Random.nextInt(256)
+          val r = 0xff
           println(f"uat($r)")
           ftdi.io.wr.payload #= r
           ftdi.io.wr.valid #= true
-          assert(ftdi.io.wr.ready.toBoolean)
+          waitUntil(ftdi.io.wr.ready.toBoolean)
           ftdi.clockDomain.waitRisingEdge()
           ftdi.io.wr.valid #= false
           println("waiting tx low")
@@ -172,13 +172,22 @@ object FtdiSim {
           println("waiting baudclk low")
           waitUntil(!ftdi.dbg.baudClk.toBoolean)
           var data = 0
-          for (i <- 7 downto 0) {
+          for (i <- 0 until 8) {
             println("waiting baudclk high")
             waitUntil(ftdi.dbg.baudClk.toBoolean)
+            sleep(2)
+            ftdi.dbg.noticeMeSenpai #= true
+            println(f"sampling ${ftdi.io.txd.toBoolean.toInt}")
             data = data | (ftdi.io.txd.toBoolean.toInt << i)
             println("waiting baduclk toggle")
             waitUntil(!ftdi.dbg.baudClk.toBoolean)
+            ftdi.dbg.noticeMeSenpai #= false
           }
+          // skip the stop bit
+          waitUntil(ftdi.dbg.baudClk.toBoolean)
+          assert(ftdi.io.txd.toBoolean == true)
+          waitUntil(!ftdi.dbg.baudClk.toBoolean)
+
           println(f"$data == $r ?")
           assert(data == r)
         }
