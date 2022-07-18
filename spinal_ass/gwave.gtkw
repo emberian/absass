@@ -1,33 +1,29 @@
 [*]
 [*] GTKWave Analyzer v3.3.104 (w)1999-2020 BSI
-[*] Sat Jul 16 05:04:57 2022
+[*] Sun Jul 17 21:09:55 2022
 [*]
-[dumpfile] "(null)"
-[savefile] "(null)"
-[timestart] 1562438
-[size] 1427 811
+[dumpfile] "/home/ember/dev/absass/spinal_ass/simWorkspace/Ftdi/test.vcd"
+[dumpfile_mtime] "Sun Jul 17 20:53:01 2022"
+[dumpfile_size] 38438636
+[savefile] "/home/ember/dev/absass/spinal_ass/gwave.gtkw"
+[timestart] 0
+[size] 2302 1249
 [pos] 226 23
-*-7.000000 1562720 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
+*-20.425188 1041000 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
 [treeopen] TOP.
 [sst_width] 262
 [signals_width] 233
 [sst_expanded] 1
-[sst_vpaned_height] 217
+[sst_vpaned_height] 365
 @28
 TOP.io_rxd
 TOP.io_txd
 TOP.io_wr_valid
 TOP.clk
-@22
-TOP.Ftdi.rctl_wrctr[11:0]
-@29
 TOP.Ftdi.baudClk
 @22
 TOP.Ftdi.rctl_baudCtr[15:0]
-TOP.Ftdi.rctl_wrctr[11:0]
 @28
 TOP.Ftdi.txar_tx_stateReg[1:0]
-TOP.Ftdi.wrfifo_io_pop_ready
-TOP.Ftdi.wrfifo_io_pop_valid
 [pattern_trace] 1
 [pattern_trace] 0
