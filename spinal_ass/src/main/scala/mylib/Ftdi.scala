@@ -23,6 +23,9 @@ class Ftdi(val fifo_sz: Int) extends Component {
 
   io.txd := True // active low
   io.wr.ready := False
+  io.rd.valid := False
+  io.rd.payload := 0
+
   val baud = 9600 Hz
 
   val baudClk = RegInit(False)
@@ -30,16 +33,7 @@ class Ftdi(val fifo_sz: Int) extends Component {
 
   dbg.baudClk := baudClk
 
-  val rdfifo = StreamFifo(
-    dataType = Byte,
-    depth = fifo_sz
-  )
-  rdfifo.io.push.valid := False
-  rdfifo.io.push.payload.assignDontCare()
-
-  rdfifo.io.pop >> io.rd
-
-  val sync_clk = Reg(Bool()) init (False) addTag (crossClockDomain)
+  val sync_clk = Reg(Bool()) init (True)
 
   val rctl = new Area {
     val currentFreq = ClockDomain.current.frequency.getValue.toBigDecimal
@@ -65,13 +59,13 @@ class Ftdi(val fifo_sz: Int) extends Component {
 
   val rxar = new Area {
     val sent = RegInit(False)
-    when(rdfifo.io.push.ready && sent) {
-      rdfifo.io.push.valid := False; sent := False
-    }
-
     val rx = new StateMachine {
       val recvbf = Reg(UInt(8 bits)) init (0)
       val bits_recvd = Reg(UInt(3 bits)) init (0)
+
+      when(io.rd.ready && sent) {
+        io.rd.valid := False
+      }
 
       val idle: State = new State with EntryPoint {
         whenIsActive {
@@ -92,10 +86,10 @@ class Ftdi(val fifo_sz: Int) extends Component {
             recvbf(6 downto 0) := recvbf(7 downto 1)
 
             when(bits_recvd === 7) {
-              rdfifo.io.push.valid := True
+              io.rd.valid := True
+              io.rd.payload := recvbf
               sent := True
-              // what does a stall do? if sent = true, we stalled.
-              rdfifo.io.push.payload := recvbf
+              // what does a stall do? if sent already true, we stalled
               goto(idle)
             }
           }
@@ -160,7 +154,7 @@ object FtdiSim {
           ftdi.dbg.noticeMeSenpai #= false
 
           ftdi.clockDomain.waitRisingEdge()
-          val r = 0xff
+          val r = Random.nextInt(256)
           println(f"uat($r)")
           ftdi.io.wr.payload #= r
           ftdi.io.wr.valid #= true
@@ -191,6 +185,39 @@ object FtdiSim {
           println(f"$data == $r ?")
           assert(data == r)
         }
+        for (_ <- 0 until 10) {
+          ftdi.clockDomain.waitRisingEdge()
+          val r = Random.nextInt(256)
+          println(f"uar($r)")
+          ftdi.io.rd.ready #= false
+          println("sending start bit")
+          waitUntil(!ftdi.dbg.baudClk.toBoolean)
+          waitUntil(ftdi.dbg.baudClk.toBoolean)
+          ftdi.io.rxd #= false
+          waitUntil(ftdi.dbg.baudClk.toBoolean)
+          waitUntil(!ftdi.dbg.baudClk.toBoolean)
+
+          var data = r
+          for (i <- 0 until 8) {
+            waitUntil(ftdi.dbg.baudClk.toBoolean)
+            println(f"wiggling out a ${data & 1}")
+            ftdi.io.rxd #= (data & 1) == 1
+            data = data >> 1
+            waitUntil(!ftdi.dbg.baudClk.toBoolean)
+          }
+
+          waitUntil(ftdi.dbg.baudClk.toBoolean)
+          ftdi.io.rxd #= true
+          waitUntil(!ftdi.dbg.baudClk.toBoolean)
+          assert(ftdi.io.rd.valid)
+          ftdi.io.rd.ready #= true
+          ftdi.clockDomain.waitRisingEdge()
+          val res = ftdi.io.rd.payload
+
+          println(f"$res == $r ?")
+          assert(res == r)
+        }
+
       }
   }
 }
