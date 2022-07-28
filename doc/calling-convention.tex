@@ -1,0 +1,185 @@
+\input _macros
+
+\title{Calling Convention}
+
+\chapter{Register Assignment}
+
+\vbox{
+	\offinterlineskip
+	\def\tspace#1{height#1&\omit&&\omit&&\omit&\cr}
+	\def\inrule{\tspace{1pt}\noalign{\hrule}\tspace{1pt}}
+	\def\tcell#1{\vtop{\hsize=5in\noindent#1}}
+	\halign{&\vrule#&\strut\quad#\hfil\quad\cr
+		\noalign{\hrule}
+		\tspace{2pt}
+		&Register&&Purpose&&Saved By&\cr
+		\tspace{2pt}
+		\noalign{\hrule}
+		&\reg{R0}&&\tcell{
+			Program Counter (\reg{PC}) or Instruction Pointer (\reg{IP}). This
+			is fixed micro\-arch\-it\-ect\-ur\-al\-ly---instruction fetch
+			occurs from the address specified in this register. It can be read
+			and written like any other, but note that there is an
+			instruction-size increment applied (approximately) after fetch,
+			such that \reg{PC} is already pointing at the next instruction (or
+			word after this instruction), which tends to combine conveniently
+			with automodification. As it occurs during the writeback phase,
+			stores targeting \reg{PC} will ignore this increment and set the
+			register directly. \insn{JAL}, similarly, reads the post-fetch
+			incremented value, which is what is stored in the link register.
+		}&&Caller&\cr
+		\inrule
+		&\reg{R1}&&\tcell{
+			Conventionally, the Stack Pointer (\reg{SP}). This points into
+			``the stack'', a region of memory which ``grows down'', in that
+			elements on top of the stack are at numerically lower addresses. A
+			push is accomplished by \code{XF *-\reg{SP}, SRC}, and a pop by
+			\code{XF dst, *\reg{SP}+}, for some targets \code{src} and
+			\code{dst}.
+		}&&Callee&\cr
+		\inrule
+		&\reg{R2}&&\tcell{
+			Conventionally, the Frame Pointer (\reg{FP}). This points to a
+			compiler-known location in the (live part of) the stack which
+			contains the activation record. As such, its value should not be
+			changed during the function's execution. Local variables are
+			accessed by offset from this register.
+		}&&Callee&\cr
+		\inrule
+		&\reg{R3}&&\tcell{
+			Conventionally, the Return Continuation address (\reg{RA}). This
+			should generally be the ``link'' register of \insn{JAL}. After
+			restoring all callee-saved registers (including this one),
+			returning from the function consists of a jump back to this
+			address, as with \code{MOV PC, RC}.
+		}&&Callee&\cr
+		\inrule
+		&\reg{R4} -- \reg{R9}&&\tcell{
+			Conventionally, these six registers are the Argument Registers
+			(\reg{A0} -- \reg{A5}). They are all caller-saved, meaning the
+			callee is free to do as it wishes; conventionally, the arguments
+			are passed in them, and return values may be read from them.
+			Compilers are free to use as many registers per argument as they
+			see fit; extra arguments are usually spilled onto the top of the
+			stack, where they remain at function entry.
+		}&&Caller&\cr
+		\inrule
+		&\reg{R10} -- \reg{R15}&&\tcell{
+			Conventionally, these six registers are the Temporary Registers
+			(\reg{T0} -- \reg{T5}). They are callee-saved, which means their
+			value must be restored at the end of the routine. Otherwise, they
+			have no prescribed purpose.
+		}&&Callee&\cr
+		\tspace{2pt}
+		\noalign{\hrule}
+	}
+}
+\bigskip
+\chapter{Function {\chapterit Pro Forma}}
+
+\section{Call}
+
+To call a function, assume we have its absolute address in a pseudo-register
+``\reg{FA}''. \reg{FA} can be any correctly used register; for example:
+
+\li It can be any one of the \reg{A0} -- \reg{A5} Argument Registers, as long
+as that register isn't live at this time; or
+
+\li It can be any Temporary Register \reg{T0} -- \reg{T5}, or even the Return
+Continuation \reg{RA}, so long as these have been appropriately saved by the
+caller.
+
+First, all live Argument Registers \reg{A0} -- \reg{A5} that are {\it not}
+\reg{FA} are spilled; as they are caller-saved, the callee is free to use any
+and all of them as it wishes, so their state cannot be guaranteed if this is
+not done. These registers can be live for multiple reasons, but the most
+typical is that they are arguments passed from the present function's caller
+which will be used later, or they are temporaries in local use.
+
+\startblock
+	\# Assume \reg{A0} -- \reg{A2} are live
+	XF *-\reg{SP}, \reg{A2}
+	XF *-\reg{SP}, \reg{A1}
+	XF *-\reg{SP}, \reg{A0}
+\endblock
+
+(The actual order of spilling does not matter, so long as it is consistent.)
+
+After this, loading the address register is simple enough: \code{LI \reg{FA},
+func} for a function starting at the label \code{func} would suffice in all
+cases, though this embeds the full word of \code{func}'s value into the
+instruction stream (\insn{LI} compiles down to \code{XF \reg{FA}, *\reg{PC}+}).
+For functions near the beginning of the address space, \insn{SI} will also work
+(as in \code{SI \reg{FA}, func}), but only if \code{func} is small enough to be
+a ``small'' immediate. Thus, absent considerable code constraints, \insn{LI} is
+safer.
+
+\startblock
+	LI \reg{FA}, func
+\endblock
+
+The call sequence, following this load, is one instruction. Note that \reg{RA}
+will be clobbered, which means it {\it must} be spilled, but this is usually
+handled in the prologue (see below).
+
+\startblock
+	JAL \reg{RA}, \reg{FA}
+\endblock
+
+Afterward, agreed-upon values are live in the Argument Registers, which can be
+used in other computations. After they are no longer live, the previous values
+can be restored:
+
+\startblock
+	\# Assume \reg{A0} is an output, and \reg{T0} has already been spilled to
+	\# store it
+	MOV \reg{T0}, \reg{A0}
+	XF \reg{A0}, *\reg{SP}+
+	XF \reg{A1}, *\reg{SP}+
+	XF \reg{A2}, *\reg{SP}+
+\endblock
+
+\section{Prologue}
+
+On entry to the function, one of the first things to reliably do is spill
+\reg{RA}, the Return Continuation, where the function will jump. Doing so first
+tends to emulate the ``CALL'' instruction of other architectures. While not
+strictly necessary, as a liveness analysis could reveal, doing so consistently
+is helpful more often than not.
+
+\startblock
+	XF *-\reg{SP}, \reg{RA}
+\endblock
+
+After this, the Frame Pointer \reg{FP} can be updated. This is, again, not
+going to be needed in functions without local arguments, but those are assumed
+to be in the minority.
+
+\startblock
+	XF *-\reg{SP}, \reg{FP}
+	MOV \reg{FP}, \reg{SP}
+\endblock
+
+With the Frame Pointer now updated to the Stack Pointer, the compiler can
+statically index from \reg{FP} to access local variables in a known
+configuration.
+
+\section{Epilogue}
+
+After all other callee-saved registers are restored, {\it except} for \reg{FP},
+\reg{SP}, and \reg{RA}, restoration proceeds more or less in the reverse of the
+prologue.
+
+\startblock
+	XF \reg{FP}, *\reg{SP}+
+	XF \reg{RA}, *\reg{SP}+
+\endblock
+
+With all callee-saved registers now restored, all that remains is to jump back
+to the caller's next instruction. Fortunately, this is in \reg{RA}:
+
+\startblock
+	MOV \reg{PC}, \reg{RA}
+\endblock
+
+\bye

@@ -1,0 +1,54 @@
+\font\titlefont=cmb12 at 24pt
+\font\chapterfont=cmb12 at 20pt
+\font\chapterit=cmti12 at 20pt
+\font\secfont=cmb12 at 16pt
+\font\subsecfont=cmb12
+
+\newcount\chapno \chapno=0
+\newcount\secno \secno=0
+\newcount\subsecno \subsecno=0
+
+%\def\title#1{\line{#1\hss}\hrule\bigskip}
+\def\title#1{\headline={\vbox{\line{#1\hss}\vskip2pt\hrule}}}
+
+\newwrite\toc
+\immediate\openout\toc=toc.tex
+
+\def\chapter#1{
+	\global\advance\chapno by1
+	\global\secno=0
+	\global\subsecno=0
+	\filbreak\medskip
+	{\chapterfont Chapter \the\chapno. #1}\bigskip
+	\xdef\dowrite{\write\toc{\string\tocchap{\the\chapno}{#1}{\noexpand\the\noexpand\count0}}}\dowrite
+}
+
+\def\section#1{
+	\global\advance\secno by1
+	\global\subsecno=0
+	\filbreak\medskip
+	{\secfont Section \the\secno. #1}\medskip
+	\xdef\dowrite{\write\toc{\string\tocsec{\the\secno}{#1}{\noexpand\the\noexpand\count0}}}\dowrite
+}
+
+\def\subsection#1{
+	\global\advance\subsecno by1
+	{\subsecfont Subsection \the\subsecno. #1}\smallskip
+}
+
+\def\tocleader{\leaders\hbox to 8pt{\hss$\cdot$\hss}}
+\def\tocpgnum#1{\hbox to 12pt{\hss\ifnum#1<0 \romannumeral-#1\else#1\fi}}
+\outer\def\tocchap#1#2#3{\medskip\line{{\bf Chapter #1. #2}\tocleader\hfil\tocpgnum{#3}}}
+\outer\def\tocsec#1#2#3{\line{\hbox{\qquad Section #1. #2}\tocleader\hfil\tocpgnum{#3}}}
+
+% Tagged semantics
+\def\insn#1{{\tt#1}}
+\def\code#1{{\tt#1}}
+\def\reg#1{{\bf#1}}
+
+% Lists
+\def\li{\item{$\bullet$}}
+
+% Blocks
+\def\startblock{\bigskip\begingroup\leftskip=4em\rightskip=4em\parindent=0pt\tt\obeylines}
+\def\endblock{\endgroup\bigskip}

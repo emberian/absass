@@ -1,0 +1,352 @@
+\input _macros
+
+\title{Instructions}
+
+\def\ins{{\tt I}}
+\def\rg#1,#2.{$[#1:#2]$}
+\def\ix#1{$[#1]$}
+
+\chapter{ASS16}
+
+The following is the encoding of ASS16, a 16-bit instruction-word ISA. Values
+are given in their natural (big-endian) representation, such that in
+\code{0xABCD}, \code{A} is the most significant digit.
+
+\bigskip
+{
+	\halign{#\qquad&&\hbox to2em{\hss#\hss}\cr
+		Hex&A&&&&B&&&&C&&&&D&&&\cr
+		Bit&a&a&a&a&b&b&b&b&c&c&c&c&d&d&d&d\cr
+		Index&15&14&13&12&11&10&9&8&7&6&5&4&3&2&1&0\cr
+	}
+}
+\bigskip
+
+C syntax is used in explications; familiarity with it is assumed. Ranges
+\rg a,b. are sorted with $a > b$, and such that it is inclusive on $b$ but
+exclusive on $a$ (thus indices are in the interval $[b, a)$, equivalently for
+index $i: b \le i < a$). This notation is {\it not} consistent with Verilog
+(which uses both indices inclusive), but {\it is} consistent with Python
+(albeit reversed), and conveniently means that the size of the extracted
+bitstring is $a - b$.
+
+The following sections assume that the instruction word is \ins.
+
+ASS16 has 16 General-Purpose Registers (GPRs). Where an instruction encodes 4
+bits for a ``register'', and implicitly refers to its value within the
+description, this should be taken to be the value stored {\it within} the
+register so numbered. All registers can be accessed in this fashion, but
+\reg{R0} is the Program Counter (\reg{PC}), so its value will be used to fetch
+the next instruction---thus, programs with linear control flow should not use
+this register. (It can be used, of course, to branch or jump.) See the calling
+convention document for details.
+
+The GPRs are not to be confused with the SRs, System Registers, which are far
+less frequently accessed; see that section for details.
+
+ASS is entirely independent of word size; it is assumed that the registers and
+memory bus can be of any size, though 16, 32, and 64 bit are envisioned.
+Instructions below may need to refer to ``the word size in bytes'', but this is
+done per-instantiation, and care has generally been taken to ensure that
+instruction codings do not vary with word size. For a given instantiation, the
+device is specified as ``ASS16/W'', where W is the word size---for example,
+``ASS16/32'' would be a 32-bit bus, 16-bit instruction ASS CPU.
+
+\section{Bitwise Instructions}
+
+\noindent\ins\rg 16,12. \code{== 0b0001}
+
+\li \ins\rg 4,0. (\reg{D}) Destination Register, LHS (0--15)
+\li \ins\rg 8,4. (\reg{S}) Source Register, RHS (0--15)
+\li \ins\rg 12,8. (\code{M}) Truth Table Number (0--15)
+
+Cf. \underbar{https://en.wikipedia.org/wiki/Truth\_table\#Binary\_operations} .
+
+The value \code{M} can be treated as a Look-Up Table (LUT), using a bit from
+\reg{D} as the most-significant and a corresponding bit from \reg{S} as the
+least-significant of an index into the 4-bit table. For convenience, the
+functions are reproduced below:
+
+\bigskip
+{
+	\tabskip=3pt
+	\halign{&{\bf #}\hss&\hbox to4em{= #\hss}\cr
+		False&0&NOR&1&Not-Conv Impl&2&Not D&3\cr
+		Not Impl&4&Not S&5&XOR&6&NAND&7\cr
+		AND&8&XNOR&9&S&10&Impl&11\cr
+		D&12&Conv Impl&13&OR&14&True&15\cr
+	}
+}
+\bigskip
+
+Of these, the most useful are:
+
+\li {\bf AND, OR, XOR, NAND, NOR, XNOR}: Traditional bitwise building blocks.
+
+\li {\bf Not D, Not S}: Complement, either in-place or of \reg{S}.
+
+\li {\bf S}: Implements \insn{MOV}, by copying \reg{S} to \reg{D}.
+
+\li {\bf D}: No-op.
+
+\li {\bf True, False}: Load all-ones or all-zeros.
+
+The rest are variations on material implication, and useful in limited
+settings.
+
+\section{Arithmetic Instructions}
+
+\noindent\ins\rg 16,12. \code{== 0b0010}
+
+\li \ins\rg 4,0. (\reg{D}) Destination Register, LHS (0--15)
+\li \ins\rg 8,4. (\reg{S}) Source Register, RHS (0--15)
+\li \ins\rg 11,8. (\code{M}) Operation Number (0--7)
+\li \ins\ix{11} (\code{Si}) Source Immediate
+
+If \code{Si} is set, the literal 4-bit value of the \reg{S} field is to be used
+as \reg{S} in the operation. Otherwise, as usual, the 4-bit field is a register
+number, and that register's value is to be used as \reg{S}.
+
+\bigskip
+{
+	\offinterlineskip
+	\halign{&\vrule#&\strut\quad#\hfil\quad\cr
+		\noalign{\hrule}
+		height2pt&\omit&&\omit&&\omit&\cr
+		&{\bf Mode}&&{\bf Operation}&&{\bf Note}&\cr
+		height2pt&\omit&&\omit&&\omit&\cr
+		\noalign{\hrule}
+		height2pt&\omit&&\omit&&\omit&\cr
+		&0&&Add ($D = D + S$)&&&\cr
+		&1&&Sub ($D = D - S$)&&&\cr
+		&2&&Shl ($D = D << S$, fill $0$)&&&\cr
+		&3&&Shr ($D = D >> S$, fill $0$)&&&\cr
+		&4&&Asr ($D = D >> S$, fill MSB of $D$)&&&\cr
+		&5&&Mul ($D = D * S$)&&*&\cr
+		&6&&Div ($D = D / S$, integer part)&&*&\cr
+		&7&&Mod ($D = D \% S$)&&*&\cr
+		height2pt&\omit&&\omit&&\omit&\cr
+		\noalign{\hrule}
+	}
+}
+\bigskip
+
+Entries marked with ``*'' are available only on models with a hardware
+multiplier (see \reg{SR 7}).
+
+\section{Comparison Instructions}
+
+\noindent\ins\rg 16,12. \code{== 0b0011}
+
+\li \ins\rg 4,0. (\reg{D}) Destination Register, LHS (0--15)
+\li \ins\rg 8,4. (\reg{S}) Source Register, RHS (0--15)
+\li \ins\ix{8} (\code{E}) Equality Test
+\li \ins\ix{9} (\code{G}) Greater Test
+\li \ins\ix{10} (\code{S}) Sign Flag
+\li \ins\ix{11} (\code{I}) Invert Flag
+
+The internal test is true if either:
+
+\li \code{E} is set and $D = S$; or
+\li \code{G} is set and $D > S$, where ``$>$'' is sign-respecting if \code{S}
+is set.
+
+The final test is the internal test, or its negation if \code{I} is set.
+
+If the final test is false, $0$ is written to \reg{D}. A nonzero value is
+written if the test is true, canonically $1$.
+
+The resulting table of operations, with some redundancy, is as follows, with
+``Above''/``Below'' being interpreted as unsigned comparison, and
+``Greater''/``Less'' as signed:
+
+\bigskip
+{
+	\tabskip=3pt
+	\halign{&{\bf #}\hss&\hbox to4em{= #\hss}\cr
+		False&0&Equal&1&Above&2&Above/Equal&3\cr
+		False&4&Equal&5&Greater&6&Greater/Equal&7\cr
+		True&8&Not Equal&9&Below/Equal&10&Below&11\cr
+		True&12&Not Equal&13&Less&14&Less/Equal&15\cr
+	}
+}
+\bigskip
+
+\section{Conditional Instructions}
+
+\noindent\ins\rg 16,12. \code{== 0b1000}
+
+\li \ins\rg 8,0. (\code{S}) Signed Offset, Instructions ($-128$--$127$)
+\li \ins\rg 12,8. (\reg{C}) Comparison Register (0--15)
+
+If the value of \reg{C} is nonzero, \reg{PC} is offset by \code{S} from the
+{\it next} instruction. The value of \code{S} is interpreted to be in {\it
+instruction words} (typically 2 bytes for ASS16).
+
+\section{Jump and Link}
+
+\noindent\ins\rg 16,11. \code{== 0b10010}
+
+\li \ins\rg 4,0. (\reg{L}) Link Register (written, next \reg{PC}) (0--15)
+\li \ins\rg 8,4. (\reg{P}) Program Register (read, new \reg{PC})) (0--15)
+\li \ins\rg 11,8. Reserved
+
+Using the \reg{PC} of the next instruction, assign \reg{L} to \reg{PC}, then
+assign \reg{PC} to \reg{P}. This implements a rudimentary ``CALL'' instruction;
+for suggestions on implementing a calling convention, see the separate
+document (which, for example, prescribes \reg{R3} as the typical Link
+Register).
+
+\section{Subword Operation}
+
+\noindent\ins\rg 16,11. \code{== 0b10011}
+
+\li \ins\rg 4,0. (\reg{D}) Destination Register (0--15)
+\li \ins\rg 8,4. (\code{Bi}) Byte Index (0--15)
+\li \ins\rg 11,8. (\code{B}) Bytes (0--7)
+
+Selects bytes out of a word-sized register. The lowest-order byte accessed in
+\reg{D} is \code{Bi}, and \code{B} bytes are accessed from it, shifted right by
+\code{Bi}. If $B = 0$, 8 bytes are selected instead.
+
+This is approximately equivalent to the following assembly, with \code{B} in
+\reg{A0} and \code{Bi} in \reg{A1}:
+
+\startblock
+	XF *-\reg{SP}, \reg{T0}
+	XF *-\reg{SP}, \reg{T1}
+	\# If $B = 0$, set \code{B} to 8.
+	BIT \reg{T0}, \reg{T0}, 0  \# Load zeros
+	MOV \reg{T1}, \reg{A0}
+	CMP.EI \reg{T1}, \reg{T0}
+	JC \reg{T1}, .window
+	SI \reg{A0}, 8
+{\leftskip=2em.window:\par}
+	MOV \reg{T0}, \reg{A0}
+	SI \reg{T1}, 3
+	SHL \reg{T0}, \reg{T1}  \# 8 bits to a byte
+	SI \reg{T1}, 1
+	SHL \reg{T1}, \reg{T0}
+	LI \reg{T0}, 1
+	SUB \reg{T1}, \reg{T0}
+	SI \reg{T0}, 3
+	SHL \reg{A1}, \reg{T0}
+	SHL \reg{T1}, \reg{A1}
+	BIT \reg{D}, \reg{T1}, 8  \# AND
+	SHR \reg{D}, \reg{A1}
+{\leftskip=2em.cleanup:\par}
+	XF \reg{T1}, *\reg{SP}+
+	XF \reg{T0}, *\reg{SP}+
+\endblock
+
+\section{System Registers}
+
+\noindent\ins\rg 16,13. \code{== 0b101}
+
+\li \ins\rg 8,0. (\reg{SR}) System Register (0--255)
+\li \ins\rg 12,8. (\reg{R}) General Register (0--15)
+\li \ins\ix{12} (\code{W}) Write Flag
+
+Read from \reg{SR} to \reg{R}, or write from \reg{R} to \reg{SR}.
+
+The System Registers have a separate namespace from the General-Purpose
+Registers; some are architectural constants, while others have meaning specific
+to the hardware. The defined ones are as follows:
+
+\bigskip
+{
+	\offinterlineskip
+	\def\tcell#1{\vtop{\hsize=3in\noindent#1}}
+	\def\tspace#1{height#1&\omit&&\omit&&\omit&&\omit&\cr}
+	\halign{&\vrule#&\strut\quad#\hfil\quad\cr
+		\noalign{\hrule}
+		\tspace{2pt}
+		&{\bf SR}&&{\bf R/W}&&{\bf Name}&&{\bf Description}&\cr
+		\tspace{2pt}
+		\noalign{\hrule}
+		\tspace{2pt}
+		&0&&R&&Model/Stepping&&\tcell{
+			\li 0: Unknown or prototype
+			\li Otherwise: reserved
+		}&\cr
+		\tspace{2pt}
+		&1&&R&&Word Size&&In bits.&\cr
+		\tspace{2pt}
+		&2&&RW&&Interrupt Vector Table&&(Spec todo.)&\cr
+		\tspace{2pt}
+		&3&&W&&Power State&&\tcell{
+			\li Bit 0: Halt
+			\li All other bits: reserved, write 0
+		}&\cr
+		\tspace{2pt}
+		&4&&RW&&Instructions Retired&&\tcell{
+			Counts continuously, incremented when an instruction is retired.
+			Writing simply sets the counter. Initialized to 0 on reset.
+		}&\cr
+		\tspace{2pt}
+		&5&&RW&&Cycles Elapsed&&\tcell{
+			Counts the number of clock cycles elapsed, starting at 0 on reset.
+			Writing simply sets the counter.
+		}&\cr
+		\tspace{2pt}
+		&6&&R&&Core Frequency&&\tcell{
+			Real frequency in $s^{-1}$ of the clock used for \reg{SR 5},
+			divided by 1024 to produce a value in kibiHertz.
+		}&\cr
+		\tspace{2pt}
+		&7&&R&&ISA Extensions&&\tcell{
+			\li Bit 0: Hardware multiplier available
+			\li All other bits: reserved
+		}&\cr
+		\tspace{2pt}
+		&10&&W&&Unofficial Debug Port&&\tcell{
+			Writing a byte will write it to stdout in most current simulators.
+		}&\cr
+		\tspace{2pt}
+		&192 -- 255&&-&&Vendor Extensions&&Reserved for vendors.&\cr
+		\tspace{2pt}
+		\noalign{\hrule}
+	}
+}
+\bigskip
+
+\section{Small Immediate}
+
+\noindent\ins\rg 16,12. \code{== 0b1100}
+
+\li \ins\rg 4,0. (\reg{D}) Destination Register (0--15)
+\li \ins\rg 12,4. (\code{I}) Immediate (0--255)
+
+Stores the unsigned value \code{I} into the register \reg{D}.
+
+\section{Data Transfer}
+
+\noindent\ins\rg 16,14. \code{== 0b01}
+
+\li \ins\rg 4,0. (\reg{D}) Destination Register (0--15)
+\li \ins\rg 8,4. (\reg{S}) Source Register (0--15)
+\li \ins\rg 10,8. (\code{Dm}) Destination Mode (0--3)
+\li \ins\ix{10} (\code{Di}) Destination Indirect
+\li \ins\rg 13,11. (\code{Sm}) Source Mode (0--3)
+\li \ins\ix{13} (\code{Si}) Source Indirect
+
+If the corresponding indirect bit is set, the register contents are used as a
+memory address, and the appropriate load/store behavior is done.
+
+The ``mode'' determines how the register is changed before and after the
+operation:
+
+\li 0b00: No change.
+\li 0b01: Autoincrement; increment the register by the number of bytes in a
+word after the operation.
+\li 0b10: Autodecrement: decrement the register by the number of bytes in a
+word before the operation.
+\li 0b11: Autopostdecrement: decrement the register by the number of bytes in a
+word after the operation.
+
+The operations, in order, are a load from \reg{S} (which may be indirect), and
+a store to \reg{D} (which also may be indirect). It is possible to use any of
+the modes with non-indirect access, which (for example) may be used to
+implement counting loops.
+
+\bye
