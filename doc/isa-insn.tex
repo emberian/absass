@@ -223,14 +223,11 @@ This is approximately equivalent to the following assembly, with \code{B} in
 	SI \reg{A0}, 8
 {\leftskip=2em.window:\par}
 	MOV \reg{T0}, \reg{A0}
-	SI \reg{T1}, 3
-	SHL \reg{T0}, \reg{T1}  \# 8 bits to a byte
+	SHL \reg{T0}, \$3  \# 8 bits to a byte
 	SI \reg{T1}, 1
 	SHL \reg{T1}, \reg{T0}
-	LI \reg{T0}, 1
-	SUB \reg{T1}, \reg{T0}
-	SI \reg{T0}, 3
-	SHL \reg{A1}, \reg{T0}
+	SUB \reg{T1}, \$1
+	SHL \reg{A1}, \$3
 	SHL \reg{T1}, \reg{A1}
 	BIT \reg{D}, \reg{T1}, 8  \# AND
 	SHR \reg{D}, \reg{A1}

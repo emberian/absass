@@ -1,3 +1,6 @@
+ADD PC,$start
+SUB PC,$start
+start:
 BIT R2, R2, 9
 LI R3, 1
 SR W, R3, 3
@@ -9,4 +12,3 @@ forward:
 LI PC, .two
 .two:
 LI PC, again
-

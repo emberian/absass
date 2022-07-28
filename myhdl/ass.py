@@ -226,7 +226,10 @@ def cpu(addr, data_in, data_out, mode, ready, valid, clk, halt, reset, d_ready, 
                     l_op.next = inst[12:8]
                 elif opcode == 0b0010:
                     d.next = regs[dl]
-                    s.next = regs[sp]
+                    if inst[11] != 0:  # SI
+                        s.next = sp
+                    else:
+                        s.next = regs[sp]
                     # FIXME: the Verilog synth can't deal with this swizzle
                     #a_op.next = getattr(ARITH, ARITH._names[int(inst[11:8])])
                     a_code = inst[11:8]

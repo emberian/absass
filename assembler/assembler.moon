@@ -101,8 +101,14 @@ class Assembler
 		@emit (@@OPCODE.LOGIC | ((tbl&0xf)<<8) | ((src&0xf)<<4) | (dst&0xf))
 
 	e_arith: (data) =>
-		{:op, :src, :dst} = data
-		@emit (@@OPCODE.ARITH | ((op&0x7)<<8) | ((src&0xf)<<4) | (dst&0xf))
+		{:op, :src, :dst, :imm} = data
+		srcnum = 0
+		if type(src) == "number"
+			@die "arith immediate too big: " .. src, "byte offset " .. @origin if src < 0 or src >= 16
+			srcnum = src
+		else
+			table.insert @fixups, {emit: 'arith', where: @origin, ref: src, :data}
+		@emit (@@OPCODE.ARITH | (if imm then 0x800 else 0) | ((op&0x7)<<8) | ((srcnum&0xf)<<4) | (dst&0xf))
 
 	e_smalli: (data) =>
 		{:dst, :val} = data
@@ -311,6 +317,11 @@ class Assembler
 			s = @optcomma num.rest
 		@ok nums, s
 
+	p_imm: (s) =>
+		s = @trim s
+		return @fail! unless s\sub(1, 1) == "$"
+		@p_expr s\sub 2
+
 	@INSNS: {}
 	DECL_INSN = (nm, parse) -> @INSNS[nm] = {
 		:parse
@@ -391,16 +402,26 @@ class Assembler
 			dst = @p_reg s
 			return @die "expected dest register", s unless dst
 			s = @trim @optcomma dst.rest
-			src = @p_reg s
-			return @die "expected source register", s unless src
-			s = @trim @optcomma src.rest
-			@ok {
-				insn: "arith"
-				data:
-					:op
-					src: src.val
-					dst: dst.val
-			}, s
+			if src = @p_reg s
+				s = @trim @optcomma src.rest
+				return @ok {
+					insn: "arith"
+					data:
+						:op
+						src: src.val
+						dst: dst.val
+				}, s
+			if srcimm = @p_imm s
+				s = @trim @optcomma srcimm.rest
+				return @ok {
+					insn: "arith"
+					data:
+						:op
+						src: srcimm.val
+						dst: dst.val
+						imm: true
+				}, s
+			return @die "expected source register or immediate", s unless src
 
 	DECL_INSN "XF", (s) =>
 		dst = @p_xft s
@@ -684,13 +705,15 @@ class Assembler
 		print 'fixing'
 		for fix in *@fixups
 			@origin = fix.where
-			@out\seek("set", @origin)
+			@out\seek "set", @origin
 			val = @force fix.ref
 			print 'fix ' .. fix.emit .. ' at ' .. @origin .. ' to ' .. val
 			switch fix.emit
 				when "word" then @emit_word val
 				when "byte" then @emit_byte val
 				when "smalli" then @e_smalli {dst: fix.dst, :val}
+				when "arith" then @e_arith with fix.data
+					.src = val
 				else error "Unknown fix type " .. fix.emit
 	
 	info: =>
