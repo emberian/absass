@@ -11,7 +11,10 @@ ECPPROG?=ecpprog
 
 all: $(PROJ).bit
 
-$(PROJ).json: ../spinal_ass/Nexass.v $(PROJ).v $(EXTRA_VERILOG) $(MEM_INIT_FILES)
+vvml.pdc: mkpdc
+	./mkpdc > vvml.pdc
+
+$(PROJ).json: ../spinal_ass/Nexass.v $(PROJ).v $(EXTRA_VERILOG) $(MEM_INIT_FILES) vvml.pdc
 	#(cd ../spinal_ass && sbt 'runMain absass.Nexass')
 	cp ../spinal_ass/Nexass.v .
 	sed -e '/input\s*clk/d' -e '/input\s*reset/d' -i Nexass.v

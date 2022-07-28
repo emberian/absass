@@ -11,7 +11,7 @@ def g(ports, name):
 
 def pmod(i, ports):
     ns = [1,2,3,4,7,8,9,10]
-    return [e(p, f"pmod{i}_{ns[j]}[{j}]") for j, p in enumerate(ports)]
+    return [e(p, f"pmod{i}_{ns[j]}") for j, p in enumerate(ports)]
 
 def hram(i, ctr_ports, dq_ports):
     ns = "cs,rst,ckn,ck,rw".split(',')
