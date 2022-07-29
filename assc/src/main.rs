@@ -25,5 +25,6 @@ fn main() -> std::io::Result<()> {
     for line in lines {
         println!("{}", line.to_asm());
     }
+    println!("\t(the result is in {})", res.place.unwrap().to_asm());
     Ok(())
 }
