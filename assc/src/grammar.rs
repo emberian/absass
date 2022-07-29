@@ -181,8 +181,8 @@ impl Expr {
 
 #[derive(Debug, Clone)]
 pub struct Program {
-    expr: Expr,
-    ns: Namespace,
+    pub expr: Expr,
+    pub ns: Namespace,
 }
 
 impl Program {

@@ -12,3 +12,20 @@ forward:
 LI PC, .two
 .two:
 LI PC, again
+
+AND R3, R3
+OR R4, R4
+XOR R5, R5
+NOT R6
+NAND R7, R7
+NOR R8, R8
+XNOR R9, R9
+
+ZERO PC
+ZERO SP
+ZERO FP
+ZERO RA
+ONE A0
+ONE A5
+ONE T0
+ONE T5

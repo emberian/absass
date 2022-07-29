@@ -96,6 +96,14 @@ class Assembler
 		DIV: 6
 		MOD: 7
 
+	@LOGIC:
+		AND: 8
+		OR: 14
+		XOR: 6
+		NAND: 7
+		NOR: 1
+		XNOR: 9
+
 	e_logic: (data) =>
 		{:tbl, :src, :dst} = data
 		@emit (@@OPCODE.LOGIC | ((tbl&0xf)<<8) | ((src&0xf)<<4) | (dst&0xf))
@@ -229,10 +237,26 @@ class Assembler
 			return @ok ex.val, s\sub 2
 		@p_num s
 
+	@REG_ALIAS:  -- Taken from the calling convention standard
+		PC: 0
+		SP: 1
+		FP: 2
+		RA: 3
+	for tnum = 0, 5
+		@REG_ALIAS["A" .. tnum] = tnum + 4
+	for tnum = 0, 5
+		@REG_ALIAS["T" .. tnum] = tnum + 10
+
 	p_reg: (s) =>
 		s = @trim s
 
-		return @ok 0, s\sub 3 if s\sub(1, 2) == "PC"
+		-- Compat with assc, whenever that happens
+		return @die "found an unallocated temporary, did assc fail?", s if s\sub(1, 1) == '%'
+
+		-- Yes, I know it's not Aho-Corasick, hopefully it works for now
+		for name, num in pairs @@REG_ALIAS
+			namelen = #name
+			return @ok num, s\sub namelen + 1 if s\sub(1, namelen) == name
 
 		if s\sub(1, 1) == "R"
 			numpart = @trim s\sub 2
@@ -286,7 +310,7 @@ class Assembler
 		normal: 0
 		autoinc: 1
 		autodec: 2
-		ones: 3
+		autopostdec: 3
 
 	p_xft: (s) =>
 		s = @trim s
@@ -298,9 +322,11 @@ class Assembler
 		reg = @p_reg s
 		return @fail! unless reg
 		s = @trim reg.rest
-		if s\sub(1, 1) == "+"
+		c = s\sub(1, 1)
+		if c == "+" or c == "-"
 			return @die "conflicting modes for transfer", s if mode ~= @@MODES.normal
-			mode, s = @@MODES.autoinc, @trim s\sub 2
+			mode = if c == "+" then @@MODES.autoinc else @@MODES.autopostdec
+			s = @trim s\sub 2
 		@ok {:ind, :mode, reg: reg.val}, s
 
 	p_seq: (s) =>
@@ -379,6 +405,17 @@ class Assembler
 				dst: reg.val
 		}, reg.rest
 
+	DECL_INSN "NOT", (s) =>
+		reg = @p_reg s
+		return @die "expected register", s unless reg
+		@ok {
+			insn: "logic"
+			data:
+				tbl: 0x3  -- the "not D" table
+				src: 0  -- doesn't matter
+				dst: reg.val
+		}, reg.rest
+
 	DECL_INSN ".BYTE", (s) =>
 		seq = @p_seq @trim s
 		return @die "expected number seq", s unless seq
@@ -421,7 +458,23 @@ class Assembler
 						dst: dst.val
 						imm: true
 				}, s
-			return @die "expected source register or immediate", s unless src
+			@die "expected source register or immediate", s unless src
+
+	for name, tbl in pairs @LOGIC
+		DECL_INSN name, (s) =>
+			dst = @p_reg s
+			return @die "expected dest register", s unless dst
+			s = @trim @optcomma dst.rest
+			src = @p_reg s
+			return @die "expected source register", s unless src
+			s = @trim @optcomma src.rest
+			@ok {
+				insn: "logic"
+				data:
+					:tbl
+					src: src.val
+					dst: dst.val
+			}, s
 
 	DECL_INSN "XF", (s) =>
 		dst = @p_xft s
