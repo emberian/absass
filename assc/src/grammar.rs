@@ -48,13 +48,14 @@ pub enum Value {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BinOp {
-    LOr, LAnd, Eq, Neq, Lt, Gt, Le, Ge, Or, Xor, And, Lsh, Rsh,
+    Assign, LOr, LAnd, Eq, Neq, Lt, Gt, Le, Ge, Or, Xor, And, Lsh, Rsh,
     Add, Sub, Mul, Div, Mod,
 }
 
 impl BinOp {
     pub fn from_rule(r: Rule) -> Option<Self> {
         match r {
+            Rule::op_assign => Some(BinOp::Assign),
             Rule::op_logic_or => Some(BinOp::LOr),
             Rule::op_logic_and => Some(BinOp::LAnd),
             Rule::op_eq => Some(BinOp::Eq),
@@ -153,6 +154,7 @@ impl Expr {
                 ex
             },
 
+            Rule::assign |
             Rule::logic_or |
             Rule::logic_and |
             Rule::rel_eq |

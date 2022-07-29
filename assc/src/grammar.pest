@@ -8,7 +8,12 @@ toplevel = _{ SOI ~ program ~ EOI }
 
 program = { expression }
 
-expression = _{ logic_or }
+expression = _{ assign }
+
+assign = {
+	logic_or ~ (op_assign ~ assign)*
+}
+	op_assign = { "=" }
 
 logic_or = {
 	logic_and ~ (op_logic_or ~ logic_and)*
@@ -82,4 +87,4 @@ literal = { lit_float | lit_int }
 		(^"e" ~ ("+" | "-")? ~ ASCII_DIGIT+)?
 	}
 
-ident = { XID_START ~ XID_CONTINUE* }
+ident = @{ XID_START ~ XID_CONTINUE* }

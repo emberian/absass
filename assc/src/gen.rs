@@ -1,13 +1,27 @@
 pub mod bv;
 pub mod insn;
 pub mod imp;
+pub mod env;
+pub mod ty;
 
 use insn::*;
+
+use crate::grammar::{Namespace, Program, Expr};
+use env::Env;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ExprCx {
+    Read,
+    Write,
+}
 
 #[derive(Debug)]
 pub struct Cx {
     next_temp: Temp,
     next_block: usize,
+    pub ns: Namespace,
+    pub env: Env,
+    pub ecx: ExprCx,
 }
 
 #[derive(Debug, Clone)]
@@ -23,6 +37,7 @@ pub enum Line {
     Insn(Insn),
     Label(String),
     Word(usize),
+    WordExpr(String),
 }
 
 impl From<Insn> for Line {
@@ -36,7 +51,8 @@ impl ToAsm for Line {
         match self {
             Line::Insn(i) => i.to_asm(),
             Line::Label(l) => format!("{}:", l),
-            Line::Word(w) => format!(".WORD {}", w)
+            Line::Word(w) => format!(".WORD {}", w),
+            Line::WordExpr(s) => format!(".WORD {}", s),
         }
     }
 }
@@ -70,6 +86,43 @@ impl Block {
         self
     }
 
+    pub fn load_into(mut self, cx: &mut Cx, dst: Place, src: Place) -> Self {
+        use Place::*;
+
+        fn mov(mut bk: Block, dst: Place, src: Place) -> Block {
+            bk.after(Insn::Logic { src, dst, op: LogicOp::S }.into())
+        }
+
+        fn bxft(mut bk: Block, cx: &mut Cx, pl: Place) -> (Xft, Block) {
+            match pl {
+                Reg(r) => (Xft { reg: Reg(r), indirect: false, mode: AutoMode::None }, bk),
+                Temp(t) => (Xft { reg: Temp(t), indirect: false, mode: AutoMode::None }, bk),
+                Label(l) => {
+                    let temp = cx.temp();
+                    bk = bk.after(Insn::Transfer {
+                        src: Xft { reg: Reg(0), indirect: true, mode: AutoMode::PostIncr },
+                        dst: Xft { reg: temp.clone(), indirect: false, mode: AutoMode::None },
+                    }.into())
+                        .after(Line::WordExpr(l.clone()));
+                    (Xft { reg: temp, indirect: true, mode: AutoMode::None }, bk)
+                },
+            }
+        }
+
+
+        match (dst, src) {
+            (Reg(d), Reg(s)) => mov(self, Reg(d), Reg(s)),
+            (Reg(d), Temp(s)) => mov(self, Reg(d), Temp(s)),
+            (Temp(d), Reg(s)) => mov(self, Temp(d), Reg(s)),
+            (Temp(d), Temp(s)) => mov(self, Temp(d), Temp(s)),
+            (d, s) => {
+                let (dxft, bk) = bxft(self, cx, d);
+                let (sxft, bk) = bxft(bk, cx, s);
+                bk.after(Insn::Transfer { src: sxft, dst: dxft }.into())
+            }
+        }
+    }
+
     pub fn to_linear(&self) -> Vec<Line> {
         let mut lines = vec![Line::Label(self.label.clone())];
         lines.extend(self.prelude.iter().cloned());
@@ -81,12 +134,17 @@ impl Block {
     }
 }
 
+pub type Top = Expr;
+
 impl Cx {
-    pub fn new() -> Self {
-        Cx {
+    pub fn new(pgm: Program) -> (Self, Top) {
+        (Cx {
             next_temp: 0,
             next_block: 0,
-        }
+            ns: pgm.ns,
+            env: Env::new(),
+            ecx: ExprCx::Read,
+        }, pgm.expr)
     }
 
     pub fn temp(&mut self) -> Place {
@@ -110,8 +168,9 @@ impl Cx {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct Res {
-    pub block: Block,
+    pub block: Option<Block>,
     pub place: Option<Place>,
 }
 
