@@ -12,7 +12,9 @@ const A_NUM: Reg = 6;
 const T0: Reg = 10;
 const T_NUM: Reg = 6;
 
+#[allow(dead_code)]
 const fn is_arg(reg: Reg) -> bool { reg >= A0 && (reg - A0) < A_NUM }
+#[allow(dead_code)]
 const fn is_temp(reg: Reg) -> bool { reg >= T0 && (reg - T0) < T_NUM }
 
 #[derive(Debug, Clone, Copy, Hash)]

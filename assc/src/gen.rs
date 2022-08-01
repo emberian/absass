@@ -87,10 +87,10 @@ impl Block {
         self
     }
 
-    pub fn load_into(mut self, cx: &mut Cx, dst: Place, src: Place) -> Self {
+    pub fn load_into(self, cx: &mut Cx, dst: Place, src: Place) -> Self {
         use Place::*;
 
-        fn mov(mut bk: Block, dst: Place, src: Place) -> Block {
+        fn mov(bk: Block, dst: Place, src: Place) -> Block {
             bk.after(Insn::Logic { src, dst, op: LogicOp::S }.into())
         }
 

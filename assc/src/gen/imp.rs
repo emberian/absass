@@ -1,6 +1,6 @@
 use super::*;
 use super::env::Bind;
-use crate::grammar::{Expr, Program, Value, BinOp, UnOp};
+use crate::grammar::{Expr, Value, BinOp, UnOp};
 
 impl Gen for Expr {
     fn gen(&self, cx: &mut Cx) -> Res {
