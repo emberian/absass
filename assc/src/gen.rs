@@ -3,6 +3,7 @@ pub mod insn;
 pub mod imp;
 pub mod env;
 pub mod ty;
+pub mod rall;
 
 use insn::*;
 

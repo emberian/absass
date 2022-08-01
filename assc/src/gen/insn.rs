@@ -27,6 +27,22 @@ pub enum LogicOp {
     True,
 }
 
+impl LogicOp {
+    pub fn uses_src(&self) -> bool {
+        match self {
+            LogicOp::D | LogicOp::ND | LogicOp::False | LogicOp::True => false,
+            _ => true,
+        }
+    }
+
+    pub fn reads_dst(&self) -> bool {
+        match self {
+            LogicOp::S | LogicOp::NS | LogicOp::False | LogicOp::True => false,
+            _ => true,
+        }
+    }
+}
+
 #[EnumRepr(type = "u8", implicit = true)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ArithOp {
@@ -73,6 +89,10 @@ impl AutoMode {
             AutoMode::PreDecr => format!("-{}", reg),
             AutoMode::PostDecr => format!("{}-", reg),
         }
+    }
+
+    pub fn modifies(&self) -> bool {
+        *self != AutoMode::None
     }
 }
 
