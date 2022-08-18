@@ -254,10 +254,10 @@ impl Insn {
             0x4000..=0x7000 => {
                 let src = (val & 0xf0) >> 4;
                 let dst = val & 0xf;
-                let s_mode = (val & 0x800) >> 11;
-                let s_deref = (val & 0x1000) >> 12;
-                let d_mode = (val & 0x400) >> 10;
-                let d_deref = (val & 0x200) >> 9;
+                let s_mode = (val & 0x1800) >> 11;
+                let s_deref = val & 0x2000;
+                let d_mode = (val & 0x300) >> 8;
+                let d_deref = val & 0x400;
                 Insn::Move {
                     src: src as Reg,
                     dst: dst as Reg,
@@ -307,7 +307,7 @@ impl Insn {
                     val: imm as u8,
                 }
             }
-            x => Insn::NotSure { value: x },
+            _ => Insn::NotSure { value: val },
         }
     }
 
@@ -405,6 +405,7 @@ impl Machine {
 
     pub fn step(&mut self, i: Insn) -> StepOut {
         use StepOut::*;
+        #[cfg(debug_assertions)]
         println!("exec {:?}", i);
 
         let mut pc = self.pc() + 2;
@@ -462,6 +463,23 @@ impl Machine {
                 } else {
                     s
                 };
+                let s = if s_deref {
+                    let mut buf = [0u8; 8];
+                    buf.copy_from_slice(
+                        &self.memory[s_val as usize..s_val as usize + WORDSZ as usize],
+                    );
+                    let w = Word::from_be_bytes(buf);
+                    #[cfg(debug_assertions)]
+                    println!("read {:016x} from {:016x}", w, s_val);
+                    w
+                } else {
+                    s
+                };
+                match s_mode {
+                    MoveMode::Incr => { self.regs[src] = self.regs[src].wrapping_add(WORDSZ); }
+                    MoveMode::DecrPost => { self.regs[src] = self.regs[src].wrapping_sub(WORDSZ); }
+                    _ => ()
+                }
                 let d_val = if let MoveMode::Decr = d_mode {
                     self.regs[dst] = d.wrapping_sub(WORDSZ);
 
@@ -469,26 +487,14 @@ impl Machine {
                 } else {
                     d
                 };
-                let s = if s_deref {
-                    let mut buf = [0u8; 8];
-                    buf.copy_from_slice(
-                        &self.memory[s_val as usize..s_val as usize + WORDSZ as usize],
-                    );
-                    Word::from_le_bytes(buf)
-                } else {
-                    s
-                };
                 if d_deref {
-                    let bts = Word::to_le_bytes(s);
+                    let bts = Word::to_be_bytes(s);
                     self.memory[d_val as usize..d_val as usize + WORDSZ as usize]
                         .copy_from_slice(&bts);
+                    #[cfg(debug_assertions)]
+                    println!("wrote {:016x} to {:016x}", s, d_val);
                 } else {
                     self.regs[dst] = s;
-                }
-                match s_mode {
-                    MoveMode::Incr => { self.regs[src] = self.regs[src].wrapping_add(WORDSZ); }
-                    MoveMode::DecrPost => { self.regs[src] = self.regs[src].wrapping_sub(WORDSZ); }
-                    _ => ()
                 }
                 match d_mode {
                     MoveMode::Incr => { self.regs[dst] = self.regs[dst].wrapping_add(WORDSZ); }
@@ -573,7 +579,13 @@ impl Machine {
 
     pub fn run(&mut self) {
         while self.pc() < self.memory.len() {
-            println!("pc {:?}", self.pc());
+            #[cfg(debug_assertions)]
+            {
+                for r in 0..16 {
+                    print!("{:x}:{:016x} ", r, self.regs[r]);
+                }
+                println!();
+            }
             let i =
                 Insn::decode((self.memory[self.pc()] as u16) << 8 | self.memory[self.pc() + 1] as u16);
             if let StepOut::Halt = self.step(i) { break; }
