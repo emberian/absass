@@ -16,7 +16,12 @@ class HRam extends Bundle {
   val dq = inout UInt (8 bits)
 }
 
+object Const {
+  // True at 76F ambient, minimal FPGA utilization.
+  val FPGAFREQ = 229.2656 MHz
+}
 class Nexass extends Component {
+
   val io = new Bundle {
     val led = out UInt (4 bits)
     val rgb0 = out UInt (3 bits)
@@ -25,11 +30,8 @@ class Nexass extends Component {
     val gsrn = in Bool ()
     val pushbutton0 = in Bool ()
     val pushbutton1 = in Bool ()
-    val pmod0_1 = out Bool ()
-    val pmod0_2 = in Bool ()
-    val pmod0_3 = out Bool ()
-    val pmod0_4 = out Bool ()
-    val pmod1_1 = out Bool ()
+    val pmod0_1 = in Bool ()
+    val pmod0_2 = out Bool ()
     // val hr0 = new HRam()
     // val hr1 = new HRam()
   }
@@ -45,7 +47,7 @@ class Nexass extends Component {
       ClockDomain(
         osc.io.HFCLKOUT,
         core_rst,
-        frequency = FixedFrequency(240.79 MHz)
+        frequency = FixedFrequency(Const.FPGAFREQ)
       )
 
   }
@@ -53,8 +55,6 @@ class Nexass extends Component {
   io.led := 15
 
   val clocked = new ClockingArea(top.core_clk) {
-    val rxClk = Reg(Bool()) init (False)
-
     val ctr = Reg(UInt(3 bits))
     io.rgb0 := 7
     io.rgb1 := 7
@@ -62,14 +62,16 @@ class Nexass extends Component {
     val fart = new Fart
     val pshd = Reg(Bool) init (False)
 
-    fart.io.rxd := io.pmod0_2
+    fart.io.rxd := io.pmod0_1
 
     fart.io.rd.ready := False
     fart.io.wr.payload.assignDontCare()
     fart.io.wr.valid := False
 
-    rxClk := fart.io.rxClk
-    io.pmod0_4 := rxClk
+    // INVERSION: we're feeding into an NPN BJT which inverts the voltage
+    // as it shifts 1.8V to 5V for the Arduino to sense.
+
+    io.pmod0_2 := RegNext(!fart.io.txd) addTag (crossClockDomain)
     new SlowArea(8 Hz) {
       ctr := ctr + 1
       pshd := pshd || io.pushbutton0
@@ -80,18 +82,14 @@ class Nexass extends Component {
       p := ctr < 4
       io.led(0) := True
 
-      io.led(1) := False
+      io.led(1) := True
 
       io.led(2) := !fart.io.synced
 
-      io.led(3) := False
+      io.led(3) := !fart.io.noticeMeSenpai
     }
   }
 
-  io.pmod0_1 := clocked.fart.io.txd
-  io.pmod0_3 := clocked.fart.io.txClk
-  io.pmod1_1 := True
-  // io.pmod0_4 := rxClk
   /*g
   val blinky = new ClockingArea(top.core_clk) {
     // val cpu = new CPU(16, false);
@@ -164,7 +162,9 @@ object FifoSim {
   def main(args: Array[String]) {
     SimConfig.withWave
       .withConfig(
-        SpinalConfig(defaultClockDomainFrequency = FixedFrequency(240.79 MHz))
+        SpinalConfig(defaultClockDomainFrequency =
+          FixedFrequency(Const.FPGAFREQ)
+        )
       )
       .doSim(new Component {
         val io = new Bundle {
@@ -212,42 +212,47 @@ object FifoSim {
   }
 }
 
-object NexassSim {
+object FartSim {
   def main(args: Array[String]) {
     SimConfig.withWave
       .withConfig(
-        SpinalConfig(defaultClockDomainFrequency = FixedFrequency(240.79 MHz))
+        SpinalConfig(defaultClockDomainFrequency =
+          FixedFrequency(Const.FPGAFREQ / 500)
+        )
       )
       .doSim(new Fart) { fart =>
         fart.clockDomain.forkStimulus(period = 10)
+        fart.io.rxd #= true
         fart.clockDomain.waitFallingEdge()
         sleep(1000)
         fart.clockDomain.waitRisingEdge()
+        waitUntil(fart.uart.dbg.txClk.toBoolean)
+        waitUntil(!fart.uart.dbg.txClk.toBoolean)
+
         for (c <- List('P', 'A', 'R', 'C')) {
 
           val r = c.toInt
           println(f"uar($r)")
           println("sending start bit")
-          waitUntil(!fart.uart.dbg.txClk.toBoolean)
-          waitUntil(fart.uart.dbg.txClk.toBoolean)
           fart.io.rxd #= false
-          waitUntil(fart.uart.dbg.txClk.toBoolean)
-          waitUntil(!fart.uart.dbg.txClk.toBoolean)
 
           var data = r
-          for (i <- 0 until 8) {
+          for (i <- 0 until 4) {
             waitUntil(fart.uart.dbg.txClk.toBoolean)
             println(f"wiggling out a ${data & 1}")
             fart.io.rxd #= (data & 1) == 1
             data = data >> 1
             waitUntil(!fart.uart.dbg.txClk.toBoolean)
+            println(f"wiggling out a ${data & 1}")
+            fart.io.rxd #= (data & 1) == 1
+            data = data >> 1
           }
 
           waitUntil(fart.uart.dbg.txClk.toBoolean)
           fart.io.rxd #= true
           waitUntil(!fart.uart.dbg.txClk.toBoolean)
-          sleep(10000)
         }
+        waitUntil(fart.io.synced.toBoolean)
       }
 
   }

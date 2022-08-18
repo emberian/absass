@@ -7,12 +7,11 @@ import spinal.sim._
 import spinal.core.sim._
 import scala.util.Random
 
-/**
-  * UART appropriate for communicating with Arduino SoftwareSerial.
+/** UART appropriate for communicating with Arduino SoftwareSerial.
   *
-  * Will not transmit if we are receiving from the Arduino; it does
-  * not support full duplex transfer and will miss the transmission
-  * if we do not stall until the Arduino is ready.
+  * Will not transmit if we are receiving from the Arduino; it does not support
+  * full duplex transfer and will miss the transmission if we do not stall until
+  * the Arduino is ready.
   */
 class Uart extends Component {
   val Byte = UInt(8 bits)
@@ -24,8 +23,8 @@ class Uart extends Component {
   }
 
   val dbg = new Bundle {
-    val txClk = out Bool () simPublic()
-    val rxClk = out Bool () simPublic()
+    val txClk = out Bool () simPublic ()
+    val rxClk = out Bool () simPublic ()
     val noticeMeSenpai = out Bool ()
     val stalled = out Bool ()
   }
@@ -44,27 +43,23 @@ class Uart extends Component {
   dbg.txClk := txClk
   dbg.rxClk := rxClk
 
-  val sync_clk = Reg(Bool()) init (True)
-
-  val reading = Reg(Bool()) init (False)
+  val sync_clk = RegInit(True)
 
   dbg.noticeMeSenpai := sync_clk
 
   val rctl = new Area {
     val currentFreq = ClockDomain.current.frequency.getValue.toBigDecimal
     val baudCtr = Reg(UInt(16 bits)) init (0)
-    val factor = (currentFreq / (2 * baud.toBigDecimal)).toInt
+    val factor = (currentFreq / (baud.toBigDecimal)).toInt
     println(f"it takes $factor cycles to toggle the clock")
-    val rdctr = Reg(UInt(log2Up(factor) + 2 bits)) init (0)
+    val rdctr = Reg(UInt(log2Up(factor) + 2 bits)) init (1)
     val wrctr = Reg(UInt(log2Up(factor) bits)) init (0)
     // we thus sample in the middle of the baud period
+    rdctr := rdctr - 1
     when(!io.rxd && sync_clk) {
-      rdctr := 2 * factor + (factor / 2) - 1
+      rdctr := factor + (factor / 2)
       rxClk := False
       sync_clk := False
-    }
-    when(!sync_clk) {
-      rdctr := rdctr - 1
     }
     wrctr := wrctr + 1
     when(rdctr === 0) { rxClk := !rxClk; rdctr := factor - 1 }
@@ -88,7 +83,8 @@ class Uart extends Component {
 
       val idle: State = new State with EntryPoint {
         whenIsActive {
-          when(!io.rxd) {
+          when(!sync_clk) {
+            rxClk := False
             goto(rd)
           }
         }
@@ -96,18 +92,16 @@ class Uart extends Component {
 
       val rd = new State {
         // god i hope these clock phases are good enough
-        onEntry { bits_recvd := 0 ; reading := True }
+        onEntry { bits_recvd := 0 }
         whenIsActive {
-          when(rxClk.rise) {
+          when(rxClk.edge) {
             bits_recvd := bits_recvd + 1
             recvbf(7) := io.rxd
             recvbf(6 downto 0) := recvbf(7 downto 1)
 
             when(bits_recvd === 7) {
               sent := True
-              when(sent) {
-                stalled := True
-              }
+              stalled := sent
               goto(stop)
             }
           }
@@ -116,7 +110,7 @@ class Uart extends Component {
 
       val stop = new State {
         whenIsActive { when(rxClk.rise) { goto(idle) } }
-        onExit { sync_clk := True ; reading := False }
+        onExit { sync_clk := True }
       }
     }
   }
@@ -127,12 +121,10 @@ class Uart extends Component {
       val dataw = Reg(UInt(10 bits)) init (0)
 
       val idle: State = new State with EntryPoint {
-        onEntry { io.wr.ready := True }
         whenIsActive {
-          io.wr.ready := !reading
+          io.wr.ready := True
           when(io.wr.valid) { goto(wr) }
         }
-        onExit { io.wr.ready := False }
       }
 
       val wr = new State {
@@ -140,27 +132,28 @@ class Uart extends Component {
         val sync = Reg(Bool) init (False)
 
         onEntry {
-          sync := False
           dataw(0) := False
           latest_bit := True // line kept high when not in use
           dataw(9) := True
           dataw(8 downto 1) := io.wr.payload
-          bits_sent := 0
         }
+        onExit { bits_sent := 0; sync := False }
         whenIsActive {
-          when(txClk.rise) {
+          when(txClk.edge) {
             sync := True
-            latest_bit := dataw(0)
-            io.txd := dataw(0) & txClk
+            latest_bit := dataw(0) || (bits_sent === 9)
+            io.txd := dataw(
+              0
+            ) || (bits_sent === 9) // 9 means we finished sending stop and it's time to gtfo
             dataw(8 downto 0) := dataw(9 downto 1)
             dataw(9) := False // so the wave readout is nicer
             bits_sent := bits_sent + 1
-            when(bits_sent === 8) {
+            when(bits_sent === 9) {
               goto(idle)
             }
           } otherwise {
             when(sync) {
-              io.txd := latest_bit & txClk
+              io.txd := latest_bit
             } otherwise {
               io.txd := True
             }
@@ -198,27 +191,26 @@ object FtdiSim {
           val r = Random.nextInt(256)
           println(f"uat($r)")
           ftdi.io.wr.payload #= r
-          ftdi.io.wr.valid #= true
           waitUntil(ftdi.io.wr.ready.toBoolean)
+          ftdi.io.wr.valid #= true
           ftdi.clockDomain.waitRisingEdge()
           ftdi.io.wr.valid #= false
           println("waiting tx low")
           waitUntil(!ftdi.io.txd.toBoolean)
-          println("waiting txClk low")
-          waitUntil(!ftdi.dbg.txClk.toBoolean)
+          sleep(2)
+          var prev = ftdi.dbg.txClk.toBoolean
           var data = 0
           for (i <- 0 until 8) {
-            println("waiting txClk high")
-            waitUntil(ftdi.dbg.txClk.toBoolean)
+            println("wait edge")
+            waitUntil(ftdi.dbg.txClk.toBoolean != prev)
+            prev = ftdi.dbg.txClk.toBoolean
             sleep(2)
             println(f"sampling ${ftdi.io.txd.toBoolean.toInt}")
             data = data | (ftdi.io.txd.toBoolean.toInt << i)
-            println("waiting baduclk toggle")
-            waitUntil(!ftdi.dbg.txClk.toBoolean)
-            ftdi.dbg.noticeMeSenpai #= false
           }
           // skip the stop bit
-          waitUntil(ftdi.dbg.txClk.toBoolean)
+          waitUntil(ftdi.dbg.txClk.toBoolean != prev)
+          sleep(2)
           assert(ftdi.io.txd.toBoolean == true)
           waitUntil(!ftdi.dbg.txClk.toBoolean)
 
@@ -231,19 +223,20 @@ object FtdiSim {
           println(f"uar($r)")
           ftdi.io.rd.ready #= false
           println("sending start bit")
-          waitUntil(!ftdi.dbg.txClk.toBoolean)
           waitUntil(ftdi.dbg.txClk.toBoolean)
+          waitUntil(!ftdi.dbg.txClk.toBoolean)
           ftdi.io.rxd #= false
-          waitUntil(ftdi.dbg.txClk.toBoolean)
-          waitUntil(!ftdi.dbg.txClk.toBoolean)
 
           var data = r
-          for (i <- 0 until 8) {
+          for (i <- 0 until 4) {
             waitUntil(ftdi.dbg.txClk.toBoolean)
             println(f"wiggling out a ${data & 1}")
             ftdi.io.rxd #= (data & 1) == 1
             data = data >> 1
             waitUntil(!ftdi.dbg.txClk.toBoolean)
+            println(f"wiggling out a ${data & 1}")
+            ftdi.io.rxd #= (data & 1) == 1
+            data = data >> 1
           }
 
           waitUntil(ftdi.dbg.txClk.toBoolean)

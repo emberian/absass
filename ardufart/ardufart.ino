@@ -29,12 +29,15 @@ bool do_handshake() {
   char buf[5] = {0};
   int i = 0;
   while (i != 4) {
-  while (!ass.available()) {
-    delayMicroseconds(800);
-  }
-  buf[i++] = ass.read();
-  sprintf(pbuf, "found %d\n", buf[i-1]);
-  Serial.print(pbuf);
+    while (!ass.available()) {
+      delayMicroseconds(800);
+      if(Serial.available()) {
+        Serial.read(); st = start;
+      }
+    }
+    buf[i++] = ass.read();
+    sprintf(pbuf, "found %d\n", buf[i-1]);
+    Serial.print(pbuf);
   }
   if (strncmp(buf, "CRAP", 4) == 0) {
     Serial.println("... ok!");
@@ -58,6 +61,7 @@ void loop() {
       if (do_handshake()) {
         st = stream;
       }
+      st = start;
       break;
     case stream:
       shuffle();
