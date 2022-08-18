@@ -17,7 +17,7 @@
 [sst_vpaned_height] 256
 @28
 TOP.clk
-TOP.Ftdi.baudClk
+TOP.Ftdi.txClk
 TOP.io_txd
 TOP.Ftdi.txar_tx_stateReg[1:0]
 @22

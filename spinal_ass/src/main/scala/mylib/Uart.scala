@@ -7,7 +7,14 @@ import spinal.sim._
 import spinal.core.sim._
 import scala.util.Random
 
-class Ftdi(val fifo_sz: Int) extends Component {
+/**
+  * UART appropriate for communicating with Arduino SoftwareSerial.
+  *
+  * Will not transmit if we are receiving from the Arduino; it does
+  * not support full duplex transfer and will miss the transmission
+  * if we do not stall until the Arduino is ready.
+  */
+class Uart extends Component {
   val Byte = UInt(8 bits)
   val io = new Bundle {
     val rd = master Stream (Byte)
@@ -17,8 +24,9 @@ class Ftdi(val fifo_sz: Int) extends Component {
   }
 
   val dbg = new Bundle {
-    val baudClk = out Bool ()
-    val noticeMeSenpai = in Bool ()
+    val txClk = out Bool () simPublic()
+    val rxClk = out Bool () simPublic()
+    val noticeMeSenpai = out Bool ()
     val stalled = out Bool ()
   }
 
@@ -30,12 +38,17 @@ class Ftdi(val fifo_sz: Int) extends Component {
 
   val baud = 9600 Hz
 
-  val baudClk = RegInit(False)
+  val txClk = RegInit(False)
   val rxClk = RegInit(False)
 
-  dbg.baudClk := baudClk
+  dbg.txClk := txClk
+  dbg.rxClk := rxClk
 
   val sync_clk = Reg(Bool()) init (True)
+
+  val reading = Reg(Bool()) init (False)
+
+  dbg.noticeMeSenpai := sync_clk
 
   val rctl = new Area {
     val currentFreq = ClockDomain.current.frequency.getValue.toBigDecimal
@@ -56,7 +69,7 @@ class Ftdi(val fifo_sz: Int) extends Component {
     wrctr := wrctr + 1
     when(rdctr === 0) { rxClk := !rxClk; rdctr := factor - 1 }
     when(wrctr === factor - 1) {
-      baudClk := !baudClk; wrctr := 0; baudCtr := baudCtr + 1
+      txClk := !txClk; wrctr := 0; baudCtr := baudCtr + 1
     }
   }
 
@@ -69,7 +82,7 @@ class Ftdi(val fifo_sz: Int) extends Component {
       io.rd.valid := sent
       io.rd.payload := recvbf
 
-      when(io.rd.ready) {
+      when(io.rd.ready && sent) {
         sent := False
       }
 
@@ -83,7 +96,7 @@ class Ftdi(val fifo_sz: Int) extends Component {
 
       val rd = new State {
         // god i hope these clock phases are good enough
-        onEntry { bits_recvd := 0 }
+        onEntry { bits_recvd := 0 ; reading := True }
         whenIsActive {
           when(rxClk.rise) {
             bits_recvd := bits_recvd + 1
@@ -103,7 +116,7 @@ class Ftdi(val fifo_sz: Int) extends Component {
 
       val stop = new State {
         whenIsActive { when(rxClk.rise) { goto(idle) } }
-        onExit { sync_clk := True }
+        onExit { sync_clk := True ; reading := False }
       }
     }
   }
@@ -116,7 +129,7 @@ class Ftdi(val fifo_sz: Int) extends Component {
       val idle: State = new State with EntryPoint {
         onEntry { io.wr.ready := True }
         whenIsActive {
-          io.wr.ready := True
+          io.wr.ready := !reading
           when(io.wr.valid) { goto(wr) }
         }
         onExit { io.wr.ready := False }
@@ -135,10 +148,10 @@ class Ftdi(val fifo_sz: Int) extends Component {
           bits_sent := 0
         }
         whenIsActive {
-          when(baudClk.rise) {
+          when(txClk.rise) {
             sync := True
             latest_bit := dataw(0)
-            io.txd := dataw(0) & baudClk
+            io.txd := dataw(0) & txClk
             dataw(8 downto 0) := dataw(9 downto 1)
             dataw(9) := False // so the wave readout is nicer
             bits_sent := bits_sent + 1
@@ -147,7 +160,7 @@ class Ftdi(val fifo_sz: Int) extends Component {
             }
           } otherwise {
             when(sync) {
-              io.txd := latest_bit & baudClk
+              io.txd := latest_bit & txClk
             } otherwise {
               io.txd := True
             }
@@ -166,7 +179,7 @@ object FtdiSim {
           defaultClockDomainFrequency = FixedFrequency(0.125 MHz)
         )
       )
-      .doSim(new Ftdi(2)) { ftdi =>
+      .doSim(new Uart) { ftdi =>
         ftdi.io.wr.valid #= false
         ftdi.io.rxd #= true
         ftdi.io.rd.ready #= false
@@ -181,7 +194,6 @@ object FtdiSim {
         }
 
         for (_ <- 0 until 10) {
-          ftdi.dbg.noticeMeSenpai #= false
 
           val r = Random.nextInt(256)
           println(f"uat($r)")
@@ -192,24 +204,23 @@ object FtdiSim {
           ftdi.io.wr.valid #= false
           println("waiting tx low")
           waitUntil(!ftdi.io.txd.toBoolean)
-          println("waiting baudclk low")
-          waitUntil(!ftdi.dbg.baudClk.toBoolean)
+          println("waiting txClk low")
+          waitUntil(!ftdi.dbg.txClk.toBoolean)
           var data = 0
           for (i <- 0 until 8) {
-            println("waiting baudclk high")
-            waitUntil(ftdi.dbg.baudClk.toBoolean)
+            println("waiting txClk high")
+            waitUntil(ftdi.dbg.txClk.toBoolean)
             sleep(2)
-            ftdi.dbg.noticeMeSenpai #= true
             println(f"sampling ${ftdi.io.txd.toBoolean.toInt}")
             data = data | (ftdi.io.txd.toBoolean.toInt << i)
             println("waiting baduclk toggle")
-            waitUntil(!ftdi.dbg.baudClk.toBoolean)
+            waitUntil(!ftdi.dbg.txClk.toBoolean)
             ftdi.dbg.noticeMeSenpai #= false
           }
           // skip the stop bit
-          waitUntil(ftdi.dbg.baudClk.toBoolean)
+          waitUntil(ftdi.dbg.txClk.toBoolean)
           assert(ftdi.io.txd.toBoolean == true)
-          waitUntil(!ftdi.dbg.baudClk.toBoolean)
+          waitUntil(!ftdi.dbg.txClk.toBoolean)
 
           println(f"$data == $r ?")
           assert(data == r)
@@ -220,24 +231,24 @@ object FtdiSim {
           println(f"uar($r)")
           ftdi.io.rd.ready #= false
           println("sending start bit")
-          waitUntil(!ftdi.dbg.baudClk.toBoolean)
-          waitUntil(ftdi.dbg.baudClk.toBoolean)
+          waitUntil(!ftdi.dbg.txClk.toBoolean)
+          waitUntil(ftdi.dbg.txClk.toBoolean)
           ftdi.io.rxd #= false
-          waitUntil(ftdi.dbg.baudClk.toBoolean)
-          waitUntil(!ftdi.dbg.baudClk.toBoolean)
+          waitUntil(ftdi.dbg.txClk.toBoolean)
+          waitUntil(!ftdi.dbg.txClk.toBoolean)
 
           var data = r
           for (i <- 0 until 8) {
-            waitUntil(ftdi.dbg.baudClk.toBoolean)
+            waitUntil(ftdi.dbg.txClk.toBoolean)
             println(f"wiggling out a ${data & 1}")
             ftdi.io.rxd #= (data & 1) == 1
             data = data >> 1
-            waitUntil(!ftdi.dbg.baudClk.toBoolean)
+            waitUntil(!ftdi.dbg.txClk.toBoolean)
           }
 
-          waitUntil(ftdi.dbg.baudClk.toBoolean)
+          waitUntil(ftdi.dbg.txClk.toBoolean)
           ftdi.io.rxd #= true
-          waitUntil(!ftdi.dbg.baudClk.toBoolean)
+          waitUntil(!ftdi.dbg.txClk.toBoolean)
           assert(ftdi.io.rd.valid.toBoolean)
           ftdi.io.rd.ready #= true
           ftdi.clockDomain.waitRisingEdge()
@@ -248,7 +259,6 @@ object FtdiSim {
           println(f"$res == $r ?")
           assert(res == r)
         }
-
       }
   }
 }
@@ -259,6 +269,6 @@ object FtdiV {
       mode = Verilog,
       defaultClockDomainFrequency = FixedFrequency(450 MHz)
     )
-      .generate(new Ftdi(3))
+      .generate(new Uart)
   }
 }

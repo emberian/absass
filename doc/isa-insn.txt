@@ -123,8 +123,10 @@ The _increment mode_ is a two bit value interpreted as:
 			- S 1: Compiled Word Size (R)
 				- in bits
 
-			- S 2: Interrupt Vector Table (RW)
-				- SPEC TODO
+			- S 2: Exception Handling Routine (RW)
+				- bit 0: Exceptions Enabled. Cleared when entering routine.
+				- all other bits: the PC will be set to this value when an
+				  interrupt occurs.
 
 			- S 3: Power State (W)
 				- bit 0: Halt
@@ -148,6 +150,23 @@ The _increment mode_ is a two bit value interpreted as:
 				- bit 0: Hardware multiplier
 				- all other bits: reserved
 
+            - S 8: Exception Continuation (RW)
+			    - Stores the previous contents of the PC when handling
+				  an exception.
+			
+			- S 9: Exception Cause (RW)
+				- bit 0: Registered Exception. If this bit is set, the remainder
+				         of the bits are interpreted according to the following
+						 table:
+
+				  - 0: Divide by Zero
+				  - 1: Illegal instruction
+				  - 2: Supervisor request
+				 
+				If the exception is not registered, then the cause is the physical
+				address of the MMIO region for the device responsible for the
+				exception.
+			
 			- S 10: Unofficial Debug Output Port
 				- writes a byte to stdout of most simulators
 

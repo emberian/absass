@@ -1,0 +1,32 @@
+[*]
+[*] GTKWave Analyzer v3.3.104 (w)1999-2020 BSI
+[*] Fri Aug 12 20:13:43 2022
+[*]
+[dumpfile] "/home/ember/dev/absass/spinal_ass/simWorkspace/Nexass/test.vcd"
+[dumpfile_mtime] "Fri Aug 12 20:05:29 2022"
+[dumpfile_size] 83895516
+[savefile] "/home/ember/dev/absass/spinal_ass/nexass.gtkw"
+[timestart] 0
+[size] 2486 1376
+[pos] -39 -39
+*-20.000000 1541000 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
+[treeopen] TOP.
+[treeopen] TOP.Nexass.
+[treeopen] TOP.Nexass.clocked_fart.
+[sst_width] 348
+[signals_width] 361
+[sst_expanded] 1
+[sst_vpaned_height] 414
+@28
+TOP.Nexass.clocked_fart.uart_1.txClk
+TOP.Nexass.clocked_fart.uart_1.io_rd_valid
+@22
+TOP.Nexass.clocked_fart.uart_1.io_rd_payload[7:0]
+@28
+TOP.Nexass.clocked_fart.m_stateReg[2:0]
+@29
+TOP.Nexass.clocked_fart.m_handshake_fifo_io_push_valid
+@28
+TOP.Nexass.clocked_fart.m_handshake_fifo_io_pop_valid
+[pattern_trace] 1
+[pattern_trace] 0
