@@ -253,53 +253,86 @@ to the hardware. The defined ones are as follows:
 \bigskip
 {
 	\offinterlineskip
-	\def\tcell#1{\vtop{\hsize=3in\noindent#1}}
+	\long\def\tcell#1{\vtop{\baselineskip=12pt\lineskip=1pt\lineskiplimit=0pt\hsize=3.75in\noindent#1}}
 	\def\tspace#1{height#1&\omit&&\omit&&\omit&&\omit&\cr}
-	\halign{&\vrule#&\strut\quad#\hfil\quad\cr
+	\def\trule#1{
+		\tspace{#1}
+		\noalign{\hrule}
+		\tspace{#1}
+	}
+	\def\tpad{\hskip2pt\relax}
+	\halign{&\vrule#&\strut\tpad#\hfil\tpad\cr
 		\noalign{\hrule}
 		\tspace{2pt}
 		&{\bf SR}&&{\bf R/W}&&{\bf Name}&&{\bf Description}&\cr
-		\tspace{2pt}
-		\noalign{\hrule}
-		\tspace{2pt}
-		&0&&R&&Model/Stepping&&\tcell{
+		\trule{2pt}
+		&0&&R&&Model/Stepping&&\tcell{%
 			\li 0: Unknown or prototype
 			\li Otherwise: reserved
 		}&\cr
-		\tspace{2pt}
+		\trule{2pt}
 		&1&&R&&Word Size&&In bits.&\cr
-		\tspace{2pt}
-		&2&&RW&&Interrupt Vector Table&&(Spec todo.)&\cr
-		\tspace{2pt}
-		&3&&W&&Power State&&\tcell{
+		\trule{2pt}
+		&2&&RW&&Exception Handling Routine&&\tcell{%
+			\li Bit 0: Exceptions enabled. Automatically cleared when entering
+			the routine.
+			\li All others: loaded into \reg{PC} when an exception or interrupt
+			occurs; bit 0 of PC is set to 0. (See also \reg{SR 8}.)
+		}&\cr
+		\trule{2pt}
+		&3&&W&&Power State&&\tcell{%
 			\li Bit 0: Halt
 			\li All other bits: reserved, write 0
 		}&\cr
-		\tspace{2pt}
-		&4&&RW&&Instructions Retired&&\tcell{
+		\trule{2pt}
+		&4&&RW&&Instructions Retired&&\tcell{%
 			Counts continuously, incremented when an instruction is retired.
 			Writing simply sets the counter. Initialized to 0 on reset.
 		}&\cr
-		\tspace{2pt}
-		&5&&RW&&Cycles Elapsed&&\tcell{
+		\trule{2pt}
+		&5&&RW&&Cycles Elapsed&&\tcell{%
 			Counts the number of clock cycles elapsed, starting at 0 on reset.
 			Writing simply sets the counter.
 		}&\cr
-		\tspace{2pt}
-		&6&&R&&Core Frequency&&\tcell{
+		\trule{2pt}
+		&6&&R&&Core Frequency&&\tcell{%
 			Real frequency in $s^{-1}$ of the clock used for \reg{SR 5},
 			divided by 1024 to produce a value in kibiHertz.
 		}&\cr
-		\tspace{2pt}
-		&7&&R&&ISA Extensions&&\tcell{
+		\trule{2pt}
+		&7&&R&&ISA Extensions&&\tcell{%
 			\li Bit 0: Hardware multiplier available
 			\li All other bits: reserved
 		}&\cr
-		\tspace{2pt}
-		&10&&W&&Unofficial Debug Port&&\tcell{
-			Writing a byte will write it to stdout in most current simulators.
+		\trule{2pt}
+		&8&&RW&&Exception Continuation&&\tcell{%
+			Contains the ``next \reg{PC}'' value before the Exception Handling
+			Routine (\reg{SR 2}) was entered. In \insn{JAL} terms, \reg{SR 2}
+			is the \reg{P} ``Program Register'', and this register is the
+			\reg{L} ``Link Register''.
 		}&\cr
-		\tspace{2pt}
+		\trule{2pt}
+		&9&&RW&&Exception Cause&&\tcell{%
+			\li Bit 0: Registered Exception. If set, the remaining bits
+			(logically right shifted by one) have an ISA-determined
+			interpretation:
+			\par\vtop{ \advance\leftskip by\parindent\noindent
+				\li 0: Divide by zero
+				\li 1: Illegal instruction
+				\li 2: Supervisor request
+			}
+			\hang Otherwise (if Bit 0 is clear), the entire register contains
+			the physical MMIO address of the device responsible for raising a
+			hardware interrupt.
+		}&\cr
+		\trule{2pt}
+		&10&&W&&Unofficial Debug Port&&\tcell{%
+			Writing a byte will write it to stdout in most current simulators.
+			Hardware implementors are allowed to ignore writes to this
+			register, but it may be of some use to expose them via an external
+			debugging interface.
+		}&\cr
+		\trule{2pt}
 		&192 -- 255&&-&&Vendor Extensions&&Reserved for vendors.&\cr
 		\tspace{2pt}
 		\noalign{\hrule}
