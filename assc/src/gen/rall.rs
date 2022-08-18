@@ -453,9 +453,11 @@ impl RaCx {
                                 break;
                             }
                         }
+                        println!("\tprevious value was saved/spilled, stack now {:?}", save_fence);
                         while let Some(top) = save_fence.last() {
                             if !top.ready { break; }
                             let top = save_fence.pop().unwrap();
+                            println!("\tpop reg {}", top.reg);
                             self.insert(time).push(Line::Insn(Insn::Transfer {
                                 src: Xft {
                                     reg: Place::Reg(stack),
@@ -489,6 +491,7 @@ impl RaCx {
                                 },
                             }));
                             save_fence.push(Fence { reg, ready: false });
+                            println!("\tsaved/spilled, stack is now {:?}", save_fence);
                             Bind { reg, saved: true }
                         },
                         Taken::Nothing => panic!("Failed to allocate a register"),
