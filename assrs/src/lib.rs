@@ -1,3 +1,5 @@
+#![feature(mixed_integer_ops)]
+
 use std::io::{BufRead, Read};
 
 pub const STEPPING: usize = 0;
@@ -49,6 +51,20 @@ impl ArithOp {
             _ => panic!("invalid arith op"),
         }
     }
+
+    pub fn brief(&self) -> &'static str {
+        use ArithOp::*;
+        match self {
+            Add => "ADD",
+            Sub => "SUB",
+            Shl => "SHL",
+            Shr => "SHR",
+            Asr => "ASR",
+            Mul => "MUL",
+            Div => "DIV",
+            Mod => "MOD",
+        }
+    }
 }
 #[derive(Debug, Hash, Clone, Copy)]
 pub enum Insn {
@@ -78,6 +94,19 @@ pub enum Insn {
         s_deref: bool,
         d_mode: MoveMode,
         d_deref: bool,
+    },
+    JumpLink {
+        prog: Reg,
+        link: Reg,
+    },
+    JumpCond {
+        offset: i8,
+        cond: Reg,
+    },
+    SubWord {
+        dst: Reg,
+        index: u8,
+        bytes: u8,
     },
     SysReg {
         write: bool,
@@ -134,6 +163,32 @@ impl Insn {
                     | ((*d_deref as u16) << 10)
                     | ((*d_mode as u16) << 8)
                     | (0x4 << 12)
+            }
+            Insn::JumpLink {
+                prog,
+                link,
+            } => {
+                *link as u16
+                    | ((*prog as u16) << 4)
+                    | (0x9 << 12)
+            }
+            Insn::JumpCond {
+                offset,
+                cond,
+            } => {
+                *offset as u16
+                    | ((*cond as u16) << 8)
+                    | (0x12 << 11)
+            }
+            Insn::SubWord {
+                dst,
+                index,
+                bytes
+            } => {
+                *dst as u16
+                    | ((*index as u16) << 4)
+                    | ((*bytes as u16) << 8)
+                    | (0x13 << 11)
             }
             Insn::SysReg {
                 write,
@@ -212,6 +267,28 @@ impl Insn {
                     d_deref: d_deref != 0,
                 }
             }
+            0x8000 => {
+                let offset = (val & 0xff) as i8;
+                let cond = (val & 0xf00) >> 8;
+                Insn::JumpCond { offset, cond: cond as Reg }
+            }
+            0x9000 => match val & 0x0800 {
+                0 => {
+                    let link = val & 0xf;
+                    let prog = (val & 0xf0) >> 4;
+                    Insn::JumpLink { prog: prog as Reg, link: link as Reg }
+                },
+                _ => {
+                    let dst = val & 0xf;
+                    let index = (val & 0xf) >> 4;
+                    let bytes = (val & 0x700) >> 8;
+                    Insn::SubWord {
+                        dst: dst as Reg,
+                        index: index as u8,
+                        bytes: bytes as u8,
+                    }
+                },
+            }
             0xa000..=0xb000 => {
                 let write = (val & 0x1000) >> 12;
                 let reg = (val & 0xf00) >> 8;
@@ -231,6 +308,71 @@ impl Insn {
                 }
             }
             x => Insn::NotSure { value: x },
+        }
+    }
+
+    pub fn brief(&self) -> Option<&'static str> {
+        match self {
+            Insn::Logic { op, .. } => Some(match op {
+                0b0000 => "F",
+                0b0001 => "NOR",
+                0b0010 => "NCI",
+                0b0011 => "ND",
+                0b0100 => "NI",
+                0b0101 => "NS",
+                0b0110 => "XOR",
+                0b0111 => "NAN",
+                0b1000 => "AND",
+                0b1001 => "XNR",
+                0b1010 => "S",
+                0b1011 => "IMP",
+                0b1100 => "D",
+                0b1101 => "CI",
+                0b1110 => "OR",
+                0b1111 => "T",
+                _ => "??",
+            }),
+            Insn::Arith { op, .. } => Some(op.brief()),
+            Insn::Compare { eq, gt, sn, iv, .. } => Some(match (eq, gt, sn, iv) {
+                (false, false, false, false) => ".F1",
+                (true, false, false, false) => ".E1",
+                (false, true, false, false) => ".AB",
+                (true, true, false, false) => ".AE",
+                (false, false, true, false) => ".F2",
+                (true, false, true, false) => ".E2",
+                (false, true, true, false) => ".GT",
+                (true, true, true, false) => ".GE",
+                (false, false, false, true) => ".T1",
+                (true, false, false, true) => ".N1",
+                (false, true, false, true) => ".BE",
+                (true, true, false, true) => ".BL",
+                (false, false, true, true) => ".T2",
+                (true, false, true, true) => ".N2",
+                (false, true, true, true) => ".LT",
+                (true, true, true, true) => ".LE",
+            }),
+            Insn::Move { .. } => Some("XF"),
+            Insn::JumpLink { .. } => Some("JL"),
+            Insn::JumpCond { .. } => Some("JC"),
+            Insn::SubWord { .. } => Some("SWO"),
+            Insn::SysReg { .. } => Some("SR"),
+            Insn::SmallImm { .. } => Some("SI"),
+            Insn::NotSure { .. } => None,
+        }
+    }
+
+    pub fn color(&self) -> (u8, u8, u8) {
+        match self {
+            Insn::Logic { .. } => (255, 0, 0),
+            Insn::Arith { .. } => (255, 255, 0),
+            Insn::Compare { .. } => (0, 255, 0),
+            Insn::Move { .. } => (0, 0, 0),
+            Insn::JumpLink { .. } => (127, 0, 0),
+            Insn::JumpCond { .. } => (127, 127, 0),
+            Insn::SubWord { .. } => (127, 0, 127),
+            Insn::SysReg { .. } => (255, 0, 255),
+            Insn::SmallImm { .. } => (0, 255, 255),
+            Insn::NotSure { .. } => (255, 255, 255),
         }
     }
 }
@@ -265,7 +407,7 @@ impl Machine {
         use StepOut::*;
         println!("exec {:?}", i);
 
-        let pc = self.pc() + 2;
+        let mut pc = self.pc() + 2;
         match i {
             Insn::Logic { src, dst, op } => {
                 let mut res: Word = 0;
@@ -358,6 +500,31 @@ impl Machine {
                 self.insns += 1;
                 return Continue;
             }
+            Insn::JumpLink {
+                link, prog
+            } => {
+                self.regs[link] = pc as Word;
+                pc = self.regs[prog] as usize;
+            }
+            Insn::JumpCond {
+                offset,
+                cond,
+            } => {
+                if self.regs[cond] != 0 {
+                    pc = pc.checked_add_signed(offset as isize).unwrap();
+                }
+            }
+            Insn::SubWord {
+                dst,
+                index,
+                bytes,
+            } => {
+                let b = if bytes == 0 { 8 } else { bytes };
+                let m = (1 << (8 * b)) - 1;
+                let s = 8 * index;
+                self.regs[dst] =
+                    (self.regs[dst] & (m << s)) >> s;
+            }
             Insn::SysReg {
                 write,
                 reg,
@@ -441,7 +608,7 @@ pub fn main() {
             let mut m = Machine::default();
             if let Some(filename) = std::env::args().nth(2) {
                 let mut rdr = std::fs::File::open(filename).expect("opening program file");
-                rdr.read_to_end(&mut m.memory);
+                rdr.read_to_end(&mut m.memory).unwrap();
             } else {
                 std::io::stdin().read_to_end(&mut m.memory).expect("reading program file");
             }
@@ -466,6 +633,42 @@ pub fn main() {
                 println!("{:?}", iv);
             }
         },
+
+        Some("gen_opcode") => {
+            match std::env::args().nth(2).as_deref() {
+                Some("html") => {
+                    println!("<html>");
+                    println!("<head><style type=\"text/css\">.valid {{ background-color: #0f03; }} table {{ border-collapse: collapse; }} table td {{ border: 1px solid #000; }}</style></head>");
+                    println!("<body><table><tr>");
+                    for insn in 0 ..= std::u16::MAX {
+                        if insn != 0 && insn % 256 == 0 {
+                            println!("</tr></tr>")
+                        }
+                        let ins = Insn::decode(insn);
+                        match ins.brief() {
+                            None => println!("<td></td><!--{:04x}-->", insn),
+                            Some(b) => println!("<td class=\"valid\">{}</td><!--{:04x}-->", b, insn),
+                        }
+                    }
+                    println!("</tr></table></body></html>");
+                },
+                Some("ppm") => {
+                    println!("P3");
+                    println!("256 256 255");
+                    for insn in 0 ..= std::u16::MAX {
+                        let insn = Insn::decode(insn);
+                        let col = insn.color();
+                        println!("{} {} {}", col.0, col.1, col.2);
+                    }
+                },
+                Some(_) => {
+                    eprintln!("bad format; try html, ppm");
+                },
+                None => {
+                    eprintln!("no format argument");
+                },
+            }
+        }
 
         Some(_) => eprintln!("no such command!"),
         None => eprintln!("no command given!"),
