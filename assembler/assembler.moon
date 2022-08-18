@@ -3,12 +3,16 @@ class Assembler
 		if type(out) == "string"
 			out = io.open out, "wb"
 		@out = out
-		@wordsize = wordsize
-		@wordbytes = math.floor wordsize / 8
+		@set_word_size wordsize
 		@labels = {}
 		@cur_global = nil
 		@origin = 0
+		@byteoff = 0
 		@fixups = {}
+
+	set_word_size: (wordsize) =>
+		@wordsize = wordsize
+		@wordbytes = math.ceil wordsize / 8
 
 	trim: (s) =>
 		start = s\find "%S"
@@ -47,6 +51,7 @@ class Assembler
 	emit_byte: (by) =>
 		@out\write string.char by
 		@origin += 1
+		@byteoff += 1
 
 	emit: (ins) =>
 		@emit_byte (ins >> 8) & 255
@@ -63,7 +68,7 @@ class Assembler
 		if v.val
 			@emit_byte v.val
 			return
-		table.insert @fixups, {emit: 'byte', where: @origin, ref: v}
+		table.insert @fixups, {emit: 'byte', where: @byteoff, org: @origin, ref: v}
 		@emit_byte 0
 
 	emit_maybe_word: (v) =>
@@ -73,7 +78,7 @@ class Assembler
 		if v.val
 			@emit_word v.val
 			return
-		table.insert @fixups, {emit: 'word', where: @origin, ref: v}
+		table.insert @fixups, {emit: 'word', where: @byteoff, org: @origin, ref: v}
 		@emit_word 0
 
 	@OPCODE:
@@ -112,10 +117,10 @@ class Assembler
 		{:op, :src, :dst, :imm} = data
 		srcnum = 0
 		if type(src) == "number"
-			@die "arith immediate too big: " .. src, "byte offset " .. @origin if src < 0 or src >= 16
+			@die "arith immediate too big: " .. src, "byte offset " .. @byteoff if src < 0 or src >= 16
 			srcnum = src
 		else
-			table.insert @fixups, {emit: 'arith', where: @origin, ref: src, :data}
+			table.insert @fixups, {emit: 'arith', where: @byteoff, org: @origin, ref: src, :data}
 		@emit (@@OPCODE.ARITH | (if imm then 0x800 else 0) | ((op&0x7)<<8) | ((srcnum&0xf)<<4) | (dst&0xf))
 
 	e_smalli: (data) =>
@@ -124,7 +129,7 @@ class Assembler
 		if type(val) == "number"
 			num = val
 		else
-			table.insert @fixups, {emit: 'smalli', where: @origin, ref: val, :dst}
+			table.insert @fixups, {emit: 'smalli', where: @byteoff, org: @origin, ref: val, :dst}
 		@emit (@@OPCODE.SMALLI | ((num & 0xff)<<4) | (dst & 0xf))
 
 	e_comp: (data) =>
@@ -434,6 +439,18 @@ class Assembler
 				words: seq.val
 		}, seq.rest
 
+	DECL_INSN ".WS", (s) =>
+		num = @p_num @trim s
+		return @die "expected word size number", s unless num
+		@set_word_size num.val
+		@ok {insn: "nop"}, num.rest
+
+	DECL_INSN ".ORG", (s) =>
+		num = @p_num @trim s
+		return @die "expected origin number", s unless num
+		@origin = num.val
+		@ok {insn: "nop"}, num.rest
+
 	for name, op in pairs @ARITH
 		DECL_INSN name, (s) =>
 			dst = @p_reg s
@@ -621,6 +638,8 @@ class Assembler
 		:emit
 	}
 
+	DECL_EMIT "nop", (ins) =>
+
 	DECL_EMIT "logic", (ins) => @e_logic ins.data
 
 	DECL_EMIT "arith", (ins) => @e_arith ins.data
@@ -757,10 +776,11 @@ class Assembler
 	fixup: =>
 		print 'fixing'
 		for fix in *@fixups
-			@origin = fix.where
-			@out\seek "set", @origin
+			@byteoff = fix.where
+			@origin = fix.org
+			@out\seek "set", @byteoff
 			val = @force fix.ref
-			print 'fix ' .. fix.emit .. ' at ' .. @origin .. ' to ' .. val
+			print 'fix ' .. fix.emit .. ' at ' .. @byteoff .. ' to ' .. val
 			switch fix.emit
 				when "word" then @emit_word val
 				when "byte" then @emit_byte val
