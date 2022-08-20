@@ -20,6 +20,33 @@ object Const {
   // True at 76F ambient, minimal FPGA utilization.
   val FPGAFREQ = 229.2656 MHz
 }
+
+class Debounce(dur: TimeNumber) extends Component {
+  val io = new Bundle {
+    val crappy = in Bool ()
+    val pressed = out Bool ()
+  }
+
+  val factor = (ClockDomain.current.frequency.getValue * dur).toBigInt
+  val counter = Reg(UInt(log2Up(factor) bits)) init (0)
+  val cycs_high = Reg(UInt(log2Up(factor) bits)) init (0)
+
+  io.pressed.setAsReg() init (False)
+
+  when(counter =/= 0) {
+    counter := counter - 1
+    when(io.crappy) {
+      cycs_high := cycs_high + 1
+    }
+  } otherwise {
+    io.pressed := cycs_high > factor / 2
+  }
+  when(io.crappy.edge && counter === 0) {
+    counter := factor - 1
+    cycs_high := 0
+  }
+}
+
 class Nexass extends Component {
 
   val io = new Bundle {
@@ -40,103 +67,64 @@ class Nexass extends Component {
 
   val core_rst = False
 
-  val top = new Area {
-    val osc = new OSC_CORE(1)
-    osc.io.HFOUTEN := True
-    val core_clk =
-      ClockDomain(
-        osc.io.HFCLKOUT,
-        core_rst,
-        frequency = FixedFrequency(Const.FPGAFREQ)
-      )
+  val fart_rst = Reg(Bool()) addTag(crossClockDomain)
 
-  }
+  val osc = new OSC_CORE(1)
+  osc.io.HFOUTEN := True
+  val core_clk =
+    ClockDomain(
+      osc.io.HFCLKOUT,
+      core_rst,
+      frequency = FixedFrequency(Const.FPGAFREQ)
+    )
+  val fart_clk = ClockDomain(
+    osc.io.HFCLKOUT,
+    fart_rst,
+    frequency = FixedFrequency(Const.FPGAFREQ)
+  )
 
   io.led := 15
 
-  val clocked = new ClockingArea(top.core_clk) {
-    val ctr = Reg(UInt(3 bits))
-    io.rgb0 := 7
-    io.rgb1 := 7
-
+  val fart = new ClockingArea(fart_clk) {
     val fart = new Fart
-    val pshd = Reg(Bool) init (False)
-
-    fart.io.rxd := io.pmod0_1
 
     fart.io.rd.ready := False
     fart.io.wr.payload.assignDontCare()
     fart.io.wr.valid := False
-
-    // INVERSION: we're feeding into an NPN BJT which inverts the voltage
-    // as it shifts 1.8V to 5V for the Arduino to sense.
-
-    io.pmod0_2 := RegNext(!fart.io.txd) addTag (crossClockDomain)
-    new SlowArea(8 Hz) {
-      ctr := ctr + 1
-      pshd := pshd || io.pushbutton0
-    }
-
-    val _slow = new Area {
-      val p = Reg(Bool()) init (False)
-      p := ctr < 4
-      io.led(0) := True
-
-      io.led(1) := True
-
-      io.led(2) := !fart.io.synced
-
-      io.led(3) := !fart.io.noticeMeSenpai
-    }
   }
 
-  /*g
-  val blinky = new ClockingArea(top.core_clk) {
-    // val cpu = new CPU(16, false);
-    val div = Reg(UInt(8 bits))
-    val shift = Reg(UInt(10 bits))
-    val prev_pb0 = Reg(Bool()) init (False)
-    val pwmd = Reg(UInt(10 bits))
-    val act = Reg(Bool()) init (False)
-    val dir = Reg(Bool()) init (False)
+  io.rgb0 := 7
+  io.rgb1 := 7
 
-    io.led := pwmd(3 downto 0)
-    io.rgb0 := pwmd(6 downto 4)
-    io.rgb1 := pwmd(9 downto 7)
+  io.led(0) := io.pushbutton0
 
-    div := div + 1
-    when(div(0)) {
-      pwmd := 0;
-    }.otherwise {
-      pwmd := shift;
-    }
-    when(div(7)) {
-      when(shift(9)) {
-        dir := True
-      }.otherwise {
-        dir := False
-      }
+  io.led(1) := True
 
-      when(act) {
-        when(shift === 0) {
-          shift := 1
-        }
-          .otherwise {
-            when(dir) {
-              shift := shift.rotateLeft(1)
-            }.otherwise {
-              shift := shift.rotateRight(1)
-            }
-          }
-        act := False
-      }
-      prev_pb0 := io.pushbutton0
+  io.led(2) := !fart.fart.io.synced
+
+  io.led(3) := !fart.fart.io.noticeMeSenpai
+
+  fart.fart.io.rxd := io.pmod0_1
+
+  val clocked = new ClockingArea(core_clk) {
+    val fart_rst_reg = RegInit(False)
+    when(fart_rst_reg) {
+      fart_rst_reg := False
     }
 
-    when(!io.pushbutton0 && !prev_pb0) {
-      act := True
+    fart_rst := fart_rst_reg
+
+    val reset_fart = new Debounce(500 ms)
+    reset_fart.io.crappy := !io.pushbutton0
+
+    when(reset_fart.io.pressed) {
+      fart_rst_reg := reset_fart.io.pressed
     }
-  }*/
+
+    io.pmod0_2 := RegNext(!fart.fart.io.txd) addTag (crossClockDomain)
+    // INVERSION: we're feeding into an NPN BJT which inverts the voltage
+    // as it shifts 1.8V to 5V for the Arduino to sense.
+  }
 }
 
 class OSC_CORE(val div: Int) extends BlackBox {
@@ -155,105 +143,5 @@ class OSC_CORE(val div: Int) extends BlackBox {
 object Nexass {
   def main(args: Array[String]) {
     SpinalVerilog(new Nexass)
-  }
-}
-
-object FifoSim {
-  def main(args: Array[String]) {
-    SimConfig.withWave
-      .withConfig(
-        SpinalConfig(defaultClockDomainFrequency =
-          FixedFrequency(Const.FPGAFREQ)
-        )
-      )
-      .doSim(new Component {
-        val io = new Bundle {
-          val finished = out Bool ()
-        }
-        val bytes_seen = Reg(UInt(2 bits)) init (0)
-        val fifo = StreamFifo(UInt(8 bits), 4)
-        val magic =
-          Vec(U(80, 8 bits), U(65, 8 bits), U(82, 8 bits), U(67, 8 bits))
-        val st = Reg(Bool()) init (False)
-        val bad = Reg(Bool()) init (False)
-        val finish = Reg(Bool()) init (False)
-        io.finished := finish
-        fifo.io.push.valid := False
-        fifo.io.push.payload.assignDontCare
-        fifo.io.pop.ready := False
-
-        when(!st) {
-          fifo.io.push.valid := True
-          fifo.io.push.payload := magic(bytes_seen)
-          bytes_seen := bytes_seen + 1
-          when(bytes_seen === 3) {
-            // do NOT SET pop ready here!!! it's a wire not a register!!!
-            st := True
-            bytes_seen := 0
-          }
-        } otherwise {
-          fifo.io.pop.ready := True
-          when(fifo.io.pop.valid) {
-            bytes_seen := bytes_seen + 1
-            when(magic(bytes_seen) =/= fifo.io.pop.payload) {
-              bad := True
-            } otherwise {
-              when(bytes_seen === 3) {
-                finish := True
-              }
-            }
-          }
-        }
-      }) { dut =>
-        dut.clockDomain.forkStimulus(2)
-        sleep(1000)
-        assert(dut.io.finished.toBoolean)
-      }
-  }
-}
-
-object FartSim {
-  def main(args: Array[String]) {
-    SimConfig.withWave
-      .withConfig(
-        SpinalConfig(defaultClockDomainFrequency =
-          FixedFrequency(Const.FPGAFREQ / 500)
-        )
-      )
-      .doSim(new Fart) { fart =>
-        fart.clockDomain.forkStimulus(period = 10)
-        fart.io.rxd #= true
-        fart.clockDomain.waitFallingEdge()
-        sleep(1000)
-        fart.clockDomain.waitRisingEdge()
-        waitUntil(fart.uart.dbg.txClk.toBoolean)
-        waitUntil(!fart.uart.dbg.txClk.toBoolean)
-
-        for (c <- List('P', 'A', 'R', 'C')) {
-
-          val r = c.toInt
-          println(f"uar($r)")
-          println("sending start bit")
-          fart.io.rxd #= false
-
-          var data = r
-          for (i <- 0 until 4) {
-            waitUntil(fart.uart.dbg.txClk.toBoolean)
-            println(f"wiggling out a ${data & 1}")
-            fart.io.rxd #= (data & 1) == 1
-            data = data >> 1
-            waitUntil(!fart.uart.dbg.txClk.toBoolean)
-            println(f"wiggling out a ${data & 1}")
-            fart.io.rxd #= (data & 1) == 1
-            data = data >> 1
-          }
-
-          waitUntil(fart.uart.dbg.txClk.toBoolean)
-          fart.io.rxd #= true
-          waitUntil(!fart.uart.dbg.txClk.toBoolean)
-        }
-        waitUntil(fart.io.synced.toBoolean)
-      }
-
   }
 }

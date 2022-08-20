@@ -32,7 +32,6 @@ class Uart extends Component {
   val stalled = RegInit(False)
   dbg.stalled := stalled
 
-  io.txd := True // active low
   io.wr.ready := False
 
   val baud = 9600 Hz
@@ -45,7 +44,7 @@ class Uart extends Component {
 
   val sync_clk = RegInit(True)
 
-  dbg.noticeMeSenpai := sync_clk
+  dbg.noticeMeSenpai := RegNext(sync_clk)
 
   val rctl = new Area {
     val currentFreq = ClockDomain.current.frequency.getValue.toBigDecimal
@@ -119,43 +118,39 @@ class Uart extends Component {
     val tx = new StateMachine {
       val bits_sent = Reg(UInt(4 bits)) init (0)
       val dataw = Reg(UInt(10 bits)) init (0)
+      val latest_bit = Reg(Bool) init (True)
+
+      io.txd := latest_bit
 
       val idle: State = new State with EntryPoint {
         whenIsActive {
           io.wr.ready := True
-          when(io.wr.valid) { goto(wr) }
+          when(io.wr.valid) {
+            dataw(0) := False
+            latest_bit := True // line kept high when not in use
+            dataw(9) := True
+            dataw(8 downto 1) := io.wr.payload
+            goto(wr)
+          }
         }
       }
 
       val wr = new State {
-        val latest_bit = Reg(Bool) init (False)
-        val sync = Reg(Bool) init (False)
+        val go = Reg(Bool) init (False)
 
-        onEntry {
-          dataw(0) := False
-          latest_bit := True // line kept high when not in use
-          dataw(9) := True
-          dataw(8 downto 1) := io.wr.payload
-        }
-        onExit { bits_sent := 0; sync := False }
+        onEntry { go := False }
+        onExit { bits_sent := 0 }
         whenIsActive {
           when(txClk.edge) {
-            sync := True
-            latest_bit := dataw(0) || (bits_sent === 9)
-            io.txd := dataw(
-              0
-            ) || (bits_sent === 9) // 9 means we finished sending stop and it's time to gtfo
-            dataw(8 downto 0) := dataw(9 downto 1)
-            dataw(9) := False // so the wave readout is nicer
-            bits_sent := bits_sent + 1
-            when(bits_sent === 9) {
-              goto(idle)
-            }
-          } otherwise {
-            when(sync) {
-              io.txd := latest_bit
-            } otherwise {
-              io.txd := True
+            go := True
+            when(go) {
+              latest_bit := dataw(0)
+              dataw(8 downto 0) := dataw(9 downto 1)
+              dataw(9) := False // so the wave readout is nicer
+              bits_sent := bits_sent + 1
+              when(bits_sent === 9) {
+                goto(idle)
+              }
             }
           }
         }

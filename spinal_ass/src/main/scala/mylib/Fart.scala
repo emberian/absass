@@ -28,13 +28,12 @@ class Fart extends Component {
   io.synced.setAsReg() init (False)
   io.noticeMeSenpai.setAsReg() init (False)
 
-  io.noticeMeSenpai := False
   uart.io.rxd := io.rxd
   io.txd := uart.io.txd
 
+  val payload = Reg(Byte) init (0)
   uart.io.wr.valid := False
-  uart.io.wr.payload := 0x0
-
+  uart.io.wr.payload := payload
   uart.io.rd.ready := False
 
   io.rd.valid := False
@@ -48,7 +47,7 @@ class Fart extends Component {
         uart.io.rd.ready := True
         when(uart.io.rd.valid) {
           handshake_fifo.io.push.valid := True
-          handshake_fifo.io.push.payload := uart.io.rd.payload
+          bytes_seen := 1
           goto(handshake)
         }
       }
@@ -56,38 +55,30 @@ class Fart extends Component {
 
     val handshake_fifo = StreamFifo(UInt(8 bits), 4)
     val magic = Vec(U(80), U(65), U(82), U(67))
+    val magic2 = Vec(U(80), U(65), U(82), U(67))
     val bytes_seen = Reg(UInt(2 bits))
     val compare_cursor = Reg(UInt(2 bits))
 
     handshake_fifo.io.push.valid := False
-    handshake_fifo.io.push.payload := 0
     handshake_fifo.io.pop.ready := False
+    handshake_fifo.io.push.payload := uart.io.rd.payload
 
     val handshake: State = new State {
-      onEntry { bytes_seen := 1 }
       whenIsActive {
         uart.io.rd.ready := True
         when(uart.io.rd.valid) {
           handshake_fifo.io.push.valid := True
-          handshake_fifo.io.push.payload := uart.io.rd.payload
-          goto(incr)
-        }
-      }
-    }
-
-    val incr: State = new State {
-      whenIsActive {
-        bytes_seen := bytes_seen + 1
-        when(bytes_seen === 3) {
-          compare_cursor := 0
-          goto(compare_pop)
-        } otherwise {
-          goto(handshake)
+          bytes_seen := bytes_seen + 1
+          when(bytes_seen === 3) {
+            compare_cursor := 0
+            goto(compare_pop)
+          }
         }
       }
     }
 
     val failing_value = RegInit(U(0, 8 bits))
+    val latched = Reg(Byte) init (0)
     val compare_got = Reg(Byte)
     val compare_pop: State = new State {
       whenIsActive {
@@ -101,22 +92,23 @@ class Fart extends Component {
 
     val compare_ram: State = new State {
       whenIsActive {
-        compare_cursor := compare_cursor + 1
         compare_got := magic(compare_cursor).resized
+        payload := compare_cursor.resize(8)
         goto(compare_wr)
       }
     }
 
     val compare_wr: State = new State {
       whenIsActive {
+        compare_cursor := compare_cursor + 1
         when(compare_got =/= failing_value) {
           io.noticeMeSenpai := True
-          uart.io.wr.payload := compare_cursor.resize(8) - 1
           uart.io.wr.valid := True
           goto(fail)
         } otherwise {
           when(compare_cursor === 3) {
-            goto(ack)
+            ack_cursor := 3
+            goto(ack_ram)
           } otherwise {
             goto(compare_pop)
           }
@@ -126,18 +118,19 @@ class Fart extends Component {
 
     val ack_cursor = Reg(UInt(2 bits))
     val ack_got = Reg(Byte)
+
     val ack_ram: State = new State {
       whenIsActive {
-        ack_cursor := ack_cursor - 1
-        ack_got := magic(ack_cursor).resized
-        goto(ack_wr)
+        payload := magic2(ack_cursor).resized
+        goto(ack)
       }
     }
 
-    val ack_wr: State = new State {
+    val ack: State = new State {
       whenIsActive {
         uart.io.wr.valid := True
-        uart.io.wr.payload := ack_got
+        ack_cursor := ack_cursor - 1
+
         when(uart.io.wr.ready) {
           when(ack_cursor === 0) {
             io.synced := True
@@ -146,13 +139,6 @@ class Fart extends Component {
             goto(ack_ram)
           }
         }
-      }
-    }
-
-    val ack: State = new State {
-      onEntry { ack_cursor := 3 }
-      whenIsActive {
-        goto(ack_ram)
       }
     }
 
@@ -170,7 +156,7 @@ class Fart extends Component {
     val cmd = Reg(UInt(8 bits)) init (0)
 
     val find_cmd: State = new State {
-      whenIsActive { goto(scream) }
+      whenIsActive {  }
     }
 
     val stream: State = new State {
@@ -181,4 +167,5 @@ class Fart extends Component {
       }
     }
   }
+  m.setEncoding(binaryOneHot)
 }
