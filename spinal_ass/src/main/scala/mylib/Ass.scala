@@ -24,8 +24,8 @@ class LogicUnit(val ws: Int) extends Component {
 object ArithOps extends SpinalEnum {
   val l_add, l_sub, l_shl, l_shr, l_asr, l_mul, l_div, l_mod =
     newElement()
-
 }
+import ArithOps._
 class ArithUnit(val ws: Int, val fancy: Boolean) extends Module {
   val io = new Bundle {
     val d = in UInt (ws bits)
@@ -37,23 +37,23 @@ class ArithUnit(val ws: Int, val fancy: Boolean) extends Module {
   val signed_max = (1 << (ws - 1) - 1)
 
   switch(io.op) {
-    is(ArithOps.l_add) { io.res := io.d + io.s }
-    is(ArithOps.l_sub) { io.res := io.d - io.s }
-    is(ArithOps.l_shl) { io.res := io.d |<< io.s }
-    is(ArithOps.l_shr) { io.res := io.d |>> io.s }
-    is(ArithOps.l_asr) {
+    is(l_add) { io.res := io.d + io.s }
+    is(l_sub) { io.res := io.d - io.s }
+    is(l_shl) { io.res := io.d |<< io.s }
+    is(l_shr) { io.res := io.d |>> io.s }
+    is(l_asr) {
       when(io.s < ws) { io.res := io.d >> io.s }
         .otherwise { io.res.setAllTo(io.d(ws - 1)) }
     }
-    is(ArithOps.l_mul) {
+    is(l_mul) {
       if (fancy) { io.res := (io.d * io.s).resize(ws bits) }
     }
-    is(ArithOps.l_div) {
+    is(l_div) {
       when(io.s =/= 0) { if (fancy) { io.res := io.d / io.s } }.otherwise {
         io.res.setAll()
       }
     }
-    is(ArithOps.l_mod) {
+    is(l_mod) {
       when(io.s =/= 0) { if (fancy) { io.res := io.d % io.s } }.otherwise {
         io.res := 0
       }
@@ -81,31 +81,42 @@ class ComparisonUnit(val ws: Int) extends Module {
 
 object Stages extends SpinalEnum {
   val s_idle, s_fetch, s_execute, s_writeback = newElement()
+  defaultEncoding = binaryOneHot
+}
+import Stages._
+
+case class CPUIO(val ws: Int) extends Bundle with IMasterSlave {
+  val insn_addr = Stream(UInt(ws bits))
+  val insn_content = Stream(UInt(16 bits))
+
+  val mem_addr = Stream(UInt(ws bits))
+  val read_port = Stream(UInt(ws bits))
+  val write_port = Stream(UInt(ws bits))
+  val mem_is_write = Bool()
+
+  val halt = Bool()
+  val dbg = new Bundle {
+    val reg = Stream(UInt(4 bits))
+    val reg_content = Stream(UInt(ws bits))
+    val reg_write = UInt(ws bits)
+    val reg_dir_out = Bool()
+    val cur_stage = Stages()
+    val insn = UInt(16 bits)
+    val sstep_insn = Bool()
+  }
+
+  override def asMaster(): Unit = {
+    out(mem_is_write, dbg.cur_stage)
+    master(insn_addr, mem_addr, write_port, dbg.reg_content)
+    slave(insn_content, read_port, dbg.reg)
+    in(halt, dbg.reg_dir_out, dbg.reg_write, dbg.insn, dbg.sstep_insn)
+  }
 }
 
 class CPU(val ws: Int, val fancy: Boolean) extends Module {
-  val Word = UInt(ws bits)
-  val Insn = UInt(16 bits)
-  val io = new Bundle {
-    val insn_addr = master Stream (Word)
-    val insn_content = slave Stream (Insn)
+  val io = master(CPUIO(ws))
 
-    val mem_addr = master Stream (Word)
-    val read_port = slave Stream (Word)
-    val write_port = master Stream (Word)
-    val mem_is_write = out Bool ()
-
-    val halt = in Bool ()
-  }
-
-  val dbg = new Bundle {
-    val reg = slave Stream (UInt(4 bits))
-    val reg_content = master Stream (UInt(ws bits))
-
-    val cur_stage = out(Stages())
-  }
-
-  val state = RegInit(Stages.s_idle)
+  val state = RegInit(s_idle)
 
   val arith = new ArithUnit(ws, fancy)
   val logic = new LogicUnit(ws)
@@ -113,7 +124,7 @@ class CPU(val ws: Int, val fancy: Boolean) extends Module {
 
   arith.io.d := 0
   arith.io.s := 0
-  arith.io.op := ArithOps.l_add
+  arith.io.op := l_add
 
   logic.io.p.assignDontCare()
   logic.io.q.assignDontCare()
@@ -130,15 +141,15 @@ class CPU(val ws: Int, val fancy: Boolean) extends Module {
 
   val pc_reg = 0
 
-  val pc = Reg(Word)
+  val pc = Reg(UInt(ws bits))
   val inst = Reg(UInt(16 bits))
 
   val dl = Reg(UInt(4 bits))
   val sp = Reg(UInt(4 bits))
 
-  val inst_ret = Reg(Word) init (0)
+  val inst_ret = Reg(UInt(ws bits)) init (0)
   inst_ret.allowOverride
-  val cycl_ct = Reg(Word) init (0)
+  val cycl_ct = Reg(UInt(ws bits)) init (0)
 
   cycl_ct := cycl_ct + 1
 
@@ -152,22 +163,22 @@ class CPU(val ws: Int, val fancy: Boolean) extends Module {
   io.write_port.payload := 0
   io.mem_is_write := False
   io.read_port.ready := False
-  dbg.reg.ready := True
-  dbg.cur_stage := state
+  io.dbg.reg.ready := True
+  io.dbg.cur_stage := state
 
-  when(dbg.reg.valid) {
-    dbg.reg_content.payload := regs(dbg.reg.payload)
-    dbg.reg_content.valid := True
+  when(io.dbg.reg.valid) {
+    io.dbg.reg_content.payload := regs(io.dbg.reg.payload)
+    io.dbg.reg_content.valid := True
   }.otherwise {
-    dbg.reg_content.payload.assignDontCare()
-    dbg.reg_content.valid := False
+    io.dbg.reg_content.payload.assignDontCare()
+    io.dbg.reg_content.valid := False
   }
 
-  when(!io.halt && state === Stages.s_idle) {
-    state := Stages.s_fetch
+  when(!io.halt && state === s_idle) {
+    state := s_fetch
   }
 
-  when(state === Stages.s_fetch) {
+  when(state === s_fetch) {
     pc := regs(pc_reg) + 2
     io.insn_addr.payload := regs(pc_reg)
     io.insn_addr.valid := True
@@ -176,14 +187,14 @@ class CPU(val ws: Int, val fancy: Boolean) extends Module {
       inst := io.insn_content.payload
       io.insn_addr.valid := False
       io.insn_content.ready := False
-      state := Stages.s_execute
+      state := s_execute
     }
   }.otherwise {
     io.insn_content.ready := False
     io.insn_addr.valid := False
   }
 
-  val result = Reg(Word)
+  val result = Reg(UInt(ws bits))
   val halt = Reg(Bool())
 
   when(io.halt) {
@@ -192,7 +203,7 @@ class CPU(val ws: Int, val fancy: Boolean) extends Module {
 
   result := 0
 
-  when(state === Stages.s_execute) {
+  when(state === s_execute) {
     dl := inst(3 downto 0)
     sp := inst(7 downto 4)
 
@@ -205,7 +216,7 @@ class CPU(val ws: Int, val fancy: Boolean) extends Module {
       val sindir = inst(13)
       val smode = inst(12 downto 11)
 
-      val scont = Reg(Word) init (0)
+      val scont = Reg(UInt(ws bits)) init (0)
       val sready = Reg(Bool()) init (False)
       val dready = Reg(Bool()) init (False)
       val pc_stowed = Reg(Bool()) init (False)
@@ -282,9 +293,9 @@ class CPU(val ws: Int, val fancy: Boolean) extends Module {
           pc_stowed := False
           inst_ret := inst_ret + 1
           when(halt) {
-            state := Stages.s_idle
+            state := s_idle
           }.otherwise {
-            state := Stages.s_fetch
+            state := s_fetch
           }
         }
       }
@@ -338,9 +349,9 @@ class CPU(val ws: Int, val fancy: Boolean) extends Module {
 
         inst_ret := inst_ret + 1
         when(halt || oughta_halt) {
-          state := Stages.s_idle
+          state := s_idle
         }.otherwise {
-          state := Stages.s_fetch
+          state := s_fetch
         }
       }.otherwise {
         switch(inst(15 downto 12)) {
@@ -380,41 +391,40 @@ class CPU(val ws: Int, val fancy: Boolean) extends Module {
             pc := regs.read(sp)
           }
           is(12) {
-            result := inst(11 downto 4)
+            result := inst(11 downto 4).resized
           }
         }
-        state := Stages.s_writeback
+        state := s_writeback
       }
 
     }
   }
 
   regs.allowOverride
-  when(state === Stages.s_writeback) {
+  when(state === s_writeback) {
     printf(
       s"writing back $inst, dl = $dl, jump to $pc, units logic=${logic.io.res}, arith=${arith.io.res}, compare=${compare.io.res}\n"
     )
     regs.write(dl, result)
-    regs.write(pc_reg, pc)
+    when(dl =/= pc_reg) {
+      regs.write(pc_reg, pc)
+    }
     inst_ret := inst_ret + 1
     when(halt) {
-      state := Stages.s_idle
+      state := s_idle
     }.otherwise {
-      state := Stages.s_fetch
+      state := s_fetch
     }
   }
 }
 
 class CPUWrapper(val ws: Int, val fancy: Boolean) extends Module {
-  val io = new Bundle {
-
-  }
+  val io = new Bundle {}
 
   val cpu = new CPU(ws, fancy)
 
-  val mem = Mem(cpu.Word, 256)
+  val mem = Mem(UInt(ws bits), 256)
 
-  
 }
 
 object Icestick {

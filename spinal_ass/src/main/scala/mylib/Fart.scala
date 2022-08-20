@@ -7,8 +7,20 @@ import spinal.sim._
 import spinal.core.sim._
 import scala.util.Random
 
-class Fart extends Component {
+object FartCmds extends SpinalEnum {
+  val rst, readReg, writeReg, readMem, writeMem, execInsn, step, run =
+    newElement()
+
+  defaultEncoding = binaryOneHot
+}
+
+import FartCmds._
+
+class Fart(ws: Int) extends Component {
   val Byte = UInt(8 bits)
+  val Word = UInt(ws bits)
+
+  val BPW = ws / 8
 
   val io = new Bundle {
     val rd = master Stream (Byte)
@@ -19,7 +31,26 @@ class Fart extends Component {
     val txClk = out Bool ()
     val rxClk = out Bool ()
     val noticeMeSenpai = out Bool ()
+
+    val ass = slave(CPUIO(ws))
   }
+
+  io.ass.dbg.reg.valid := False
+  io.ass.dbg.reg.payload := 0x0
+  io.ass.dbg.reg_content.ready := False
+  io.ass.dbg.reg_write := 0x0
+  io.ass.dbg.reg_dir_out := False
+  io.ass.dbg.sstep_insn := False
+
+  io.ass.insn_addr.ready := False
+  io.ass.insn_content.payload := 0x0
+  io.ass.insn_content.valid := False
+  io.ass.mem_addr.ready := False
+  io.ass.read_port.valid := False
+  io.ass.read_port.payload := 0x0
+  io.ass.write_port.ready := False
+
+  io.ass.halt.setAsReg() init (True)
 
   val uart = new Uart
   io.txClk := uart.dbg.txClk
@@ -153,10 +184,160 @@ class Fart extends Component {
       }
     }
 
-    val cmd = Reg(UInt(8 bits)) init (0)
+    val cmd = Reg(FartCmds()) init (rst)
 
     val find_cmd: State = new State {
-      whenIsActive {  }
+      whenIsActive {
+        uart.io.rd.ready := True
+        when(uart.io.rd.valid) {
+          cmd.assignFromBits(uart.io.rd.payload.asBits)
+          goto(handle)
+        }
+      }
+    }
+
+    val handle: State = new State {
+      whenIsActive {
+        switch(cmd) {
+          is(rst) {
+            goto(scream)
+          }
+          is(readReg) {
+            goto(read_reg_num)
+          }
+          is(writeReg) {
+            goto(write_reg_num)
+          }
+          is(execInsn) {
+            goto(read_insn)
+          }
+          is(step) {
+            goto(step_s)
+          }
+          is(run) {
+            goto(run_s)
+          }
+        }
+      }
+    }
+
+    val reg_to_op = Reg(UInt(4 bits))
+
+    val word_to_write = Reg(Word)
+    val word_reading = Reg(Word)
+
+    val read_reg_num: State = new State {
+      whenIsActive {
+        uart.io.rd.ready := True
+        when(uart.io.rd.valid) {
+          reg_to_op := uart.io.rd.payload(3 downto 0)
+          goto(read_reg)
+        }
+      }
+    }
+
+    val read_reg: State = new State {
+      whenIsActive {
+        io.ass.dbg.reg.valid := True
+        io.ass.dbg.reg.payload := reg_to_op
+        io.ass.dbg.reg_content.ready := True
+        io.ass.dbg.reg_dir_out := False
+        when(io.ass.dbg.reg_content.valid) {
+          word_to_write := io.ass.dbg.reg_content.payload
+          goto(write_one_word)
+        }
+      }
+    }
+
+    val word_bytes = Reg(UInt(log2Up(BPW) bits)) init (0)
+
+    val write_one_word: State = new State {
+      onEntry { word_bytes := 0 }
+      whenIsActive {
+        uart.io.wr.valid := True
+        uart.io.wr.payload := word_to_write(7 downto 0)
+        when(uart.io.wr.ready) {
+          word_bytes := word_bytes + 1
+          word_to_write := (word_to_write >> 8).resized
+          when(word_bytes === BPW - 1) {
+            goto(find_cmd)
+          }
+        }
+      }
+    }
+
+    val write_reg_num: State = new State {
+      whenIsActive {
+        uart.io.rd.ready := True
+        when(uart.io.rd.valid) {
+          reg_to_op := uart.io.rd.payload(3 downto 0)
+          goto(write_reg_read_one_word)
+        }
+      }
+    }
+
+    val write_reg_read_one_word: State = new State {
+      onEntry { word_bytes := 0; word_reading := 0 }
+      whenIsActive {
+        uart.io.rd.ready := True
+        when(uart.io.rd.valid) {
+          word_bytes := word_bytes + 1
+          word_reading := (word_reading << 8).resize(
+            ws
+          ) | uart.io.rd.payload.resized
+          when(word_bytes === BPW - 1) {
+            goto(write_reg_finish)
+          }
+        }
+      }
+    }
+
+    val write_reg_finish: State = new State {
+      whenIsActive {
+        io.ass.dbg.reg.valid := True
+        io.ass.dbg.reg.payload := reg_to_op
+        io.ass.dbg.reg_write := word_to_write
+        io.ass.dbg.reg_dir_out := True
+        when(io.ass.dbg.reg.ready) {
+          goto(find_cmd)
+        }
+      }
+    }
+
+    val insn_to_exec = Reg(UInt(16 bits))
+    val read_one = RegInit(False)
+    val read_insn: State = new State {
+      onEntry { read_one := False; io.ass.halt := True }
+      whenIsActive {
+        uart.io.rd.ready := True
+        when(uart.io.rd.valid) {
+          when(!read_one) {
+            insn_to_exec(7 downto 0) := uart.io.rd.payload
+            read_one := True
+          } otherwise {
+            insn_to_exec(15 downto 8) := uart.io.rd.payload
+            goto(exec_insn)
+          }
+          word_to_write := uart.io.rd.payload.resized
+          goto(write_one_word)
+        }
+      }
+    }
+    io.ass.dbg.insn := insn_to_exec
+
+    val exec_insn: State = new State {
+      whenIsActive {
+        when(io.ass.dbg.cur_stage === Stages.s_idle) {
+          io.ass.dbg.sstep_insn := True
+        }
+      }
+    }
+    val step_s: State = new State {
+      whenIsActive {}
+    }
+
+    val run_s: State = new State {
+      whenIsActive {}
     }
 
     val stream: State = new State {

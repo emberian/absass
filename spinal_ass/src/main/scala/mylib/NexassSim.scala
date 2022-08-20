@@ -91,7 +91,7 @@ object FartSim {
           FixedFrequency(Const.FPGAFREQ / 500)
         )
       )
-      .doSim(new Fart) { fart =>
+      .doSim(new Fart(3)) { fart =>
         fart.clockDomain.forkStimulus(period = 10)
         fart.io.rxd #= true
         fart.clockDomain.waitFallingEdge()

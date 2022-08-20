@@ -242,7 +242,7 @@ object CPUSim {
         c.io.insn_content.valid #= true
         c.clockDomain.waitRisingEdge()
         c.io.insn_content.valid #= true
-        waitUntil(c.dbg.cur_stage == 1)
+        waitUntil(c.io.dbg.cur_stage == 1)
       }
       def pc(c: CPU): BigInt = {
         //assert(c.io.insn_addr.valid == 1)

@@ -48,7 +48,6 @@ class Debounce(dur: TimeNumber) extends Component {
 }
 
 class Nexass extends Component {
-
   val io = new Bundle {
     val led = out UInt (4 bits)
     val rgb0 = out UInt (3 bits)
@@ -67,7 +66,8 @@ class Nexass extends Component {
 
   val core_rst = False
 
-  val fart_rst = Reg(Bool()) addTag(crossClockDomain)
+  val fart_rst = Reg(Bool()) addTag (crossClockDomain)
+  val cpu_rst = Reg(Bool()) addTag (crossClockDomain)
 
   val osc = new OSC_CORE(1)
   osc.io.HFOUTEN := True
@@ -77,16 +77,23 @@ class Nexass extends Component {
       core_rst,
       frequency = FixedFrequency(Const.FPGAFREQ)
     )
+
   val fart_clk = ClockDomain(
     osc.io.HFCLKOUT,
     fart_rst,
     frequency = FixedFrequency(Const.FPGAFREQ)
   )
 
+  val cpu_clk = ClockDomain(
+    osc.io.HFCLKOUT,
+    cpu_rst,
+    frequency = FixedFrequency(Const.FPGAFREQ)
+  )
+
   io.led := 15
 
   val fart = new ClockingArea(fart_clk) {
-    val fart = new Fart
+    val fart = new Fart(16)
 
     fart.io.rd.ready := False
     fart.io.wr.payload.assignDontCare()
@@ -106,20 +113,22 @@ class Nexass extends Component {
 
   fart.fart.io.rxd := io.pmod0_1
 
-  val clocked = new ClockingArea(core_clk) {
-    val fart_rst_reg = RegInit(False)
-    when(fart_rst_reg) {
-      fart_rst_reg := False
-    }
+  val cpu = new ClockingArea(cpu_clk) {
+    val ass = new CPU(16, true)
+  }
 
-    fart_rst := fart_rst_reg
+  fart.fart.io.ass <> cpu.ass.io
 
+  val top = new ClockingArea(core_clk) {
     val reset_fart = new Debounce(500 ms)
     reset_fart.io.crappy := !io.pushbutton0
 
-    when(reset_fart.io.pressed) {
-      fart_rst_reg := reset_fart.io.pressed
-    }
+    fart_rst := reset_fart.io.pressed
+
+    val reset_cpu = new Debounce(500 ms)
+    reset_cpu.io.crappy := !io.pushbutton1
+
+    cpu_rst := reset_cpu.io.pressed
 
     io.pmod0_2 := RegNext(!fart.fart.io.txd) addTag (crossClockDomain)
     // INVERSION: we're feeding into an NPN BJT which inverts the voltage
