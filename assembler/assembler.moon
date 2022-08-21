@@ -1,14 +1,12 @@
 class Assembler
-	new: (out, wordsize = 64) =>
-		if type(out) == "string"
-			out = io.open out, "wb"
-		@out = out
+	new: (wordsize = 64) =>
 		@set_word_size wordsize
 		@labels = {}
 		@cur_global = nil
 		@origin = 0
 		@byteoff = 0
 		@fixups = {}
+		@buf = {}
 
 	set_word_size: (wordsize) =>
 		@wordsize = wordsize
@@ -49,7 +47,10 @@ class Assembler
 		0
 
 	emit_byte: (by) =>
-		@out\write string.char by
+		if @byteoff+1 > #@buf
+			table.insert @buf, by
+		else
+			@buf[@byteoff+1] = by
 		@origin += 1
 		@byteoff += 1
 
@@ -778,7 +779,6 @@ class Assembler
 		for fix in *@fixups
 			@byteoff = fix.where
 			@origin = fix.org
-			@out\seek "set", @byteoff
 			val = @force fix.ref
 			print 'fix ' .. fix.emit .. ' at ' .. @byteoff .. ' to ' .. val
 			switch fix.emit
@@ -805,8 +805,11 @@ if arg
 		return
 
 	source = io.read "*a"
-	assembler = Assembler arg[1], 16
+	assembler = Assembler 16
 	assembler\run source
 	assembler\info!
+	f = io.open arg[1], "wb"
+	for i, b in assembler.buf
+		io.write f b
 
 {:Assembler}
