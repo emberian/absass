@@ -17,8 +17,7 @@ class HRam extends Bundle {
 }
 
 object Const {
-  // True at 76F ambient, minimal FPGA utilization.
-  val FPGAFREQ = 229.2656 MHz
+  val FPGAFREQ = 240 MHz
 }
 
 class Debounce(dur: TimeNumber) extends Component {
@@ -50,8 +49,6 @@ class Debounce(dur: TimeNumber) extends Component {
 class Nexass extends Component {
   val io = new Bundle {
     val led = out UInt (4 bits)
-    val rgb0 = out UInt (3 bits)
-    val rgb1 = out UInt (3 bits)
     val dipsw = in UInt (4 bits)
     val gsrn = in Bool ()
     val pushbutton0 = in Bool ()
@@ -78,46 +75,7 @@ class Nexass extends Component {
       frequency = FixedFrequency(Const.FPGAFREQ)
     )
 
-  val fart_clk = ClockDomain(
-    osc.io.HFCLKOUT,
-    fart_rst,
-    frequency = FixedFrequency(Const.FPGAFREQ)
-  )
-
-  val cpu_clk = ClockDomain(
-    osc.io.HFCLKOUT,
-    cpu_rst,
-    frequency = FixedFrequency(Const.FPGAFREQ)
-  )
-
   io.led := 15
-
-  val fart = new ClockingArea(fart_clk) {
-    val fart = new Fart(16)
-
-    fart.io.rd.ready := False
-    fart.io.wr.payload.assignDontCare()
-    fart.io.wr.valid := False
-  }
-
-  io.rgb0 := 7
-  io.rgb1 := 7
-
-  io.led(0) := io.pushbutton0
-
-  io.led(1) := True
-
-  io.led(2) := !fart.fart.io.synced
-
-  io.led(3) := !fart.fart.io.noticeMeSenpai
-
-  fart.fart.io.rxd := io.pmod0_1
-
-  val cpu = new ClockingArea(cpu_clk) {
-    val ass = new CPU(16, true)
-  }
-
-  fart.fart.io.ass <> cpu.ass.io
 
   val top = new ClockingArea(core_clk) {
     val reset_fart = new Debounce(500 ms)
@@ -127,6 +85,31 @@ class Nexass extends Component {
 
     val reset_cpu = new Debounce(500 ms)
     reset_cpu.io.crappy := !io.pushbutton1
+
+    val fart = new ResetArea(reset_fart.io.pressed, false) {
+      val fart = new Fart(16)
+
+      fart.io.rd.ready := False
+      fart.io.wr.payload.assignDontCare()
+      fart.io.wr.valid := False
+      fart.dbg.waitResp := False
+    }
+
+    io.led(0) := io.pushbutton0
+
+    io.led(1) := True
+
+    io.led(2) := !fart.fart.dbg.synced
+
+    io.led(3) := !fart.fart.dbg.noticeMeSenpai
+
+    fart.fart.io.rxd := io.pmod0_1
+
+    val cpu = new ResetArea(reset_cpu.io.pressed || fart.fart.io.rst_cpu, false) {
+      val ass = new CPU(16, true)
+    }
+
+    fart.fart.io.ass <> cpu.ass.dbg
 
     cpu_rst := reset_cpu.io.pressed
 
@@ -151,6 +134,6 @@ class OSC_CORE(val div: Int) extends BlackBox {
 
 object Nexass {
   def main(args: Array[String]) {
-    SpinalVerilog(new Nexass)
+    SpinalVerilog(new Nexass).printPruned()
   }
 }

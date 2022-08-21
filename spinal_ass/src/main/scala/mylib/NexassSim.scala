@@ -88,43 +88,28 @@ object FartSim {
     SimConfig.withWave
       .withConfig(
         SpinalConfig(defaultClockDomainFrequency =
-          FixedFrequency(Const.FPGAFREQ / 500)
+          FixedFrequency(Const.FPGAFREQ/1000)
         )
       )
-      .doSim(new Fart(3)) { fart =>
-        fart.clockDomain.forkStimulus(period = 10)
+      .doSim(new Fart(8)) { fart =>
+        fart.clockDomain.forkStimulus(2)
         fart.io.rxd #= true
-        fart.clockDomain.waitFallingEdge()
-        sleep(1000)
-        fart.clockDomain.waitRisingEdge()
-        waitUntil(fart.uart.dbg.txClk.toBoolean)
-        waitUntil(!fart.uart.dbg.txClk.toBoolean)
-
+        fart.uart.dbg.noticeMeSenpai #= false
+        fart.dbg.waitResp #= false
+        sleep(1)
         for (c <- List('P', 'A', 'R', 'C')) {
-
-          val r = c.toInt
-          println(f"uar($r)")
-          println("sending start bit")
-          fart.io.rxd #= false
-
-          var data = r
-          for (i <- 0 until 4) {
-            waitUntil(fart.uart.dbg.txClk.toBoolean)
-            println(f"wiggling out a ${data & 1}")
-            fart.io.rxd #= (data & 1) == 1
-            data = data >> 1
-            waitUntil(!fart.uart.dbg.txClk.toBoolean)
-            println(f"wiggling out a ${data & 1}")
-            fart.io.rxd #= (data & 1) == 1
-            data = data >> 1
-          }
-
-          waitUntil(fart.uart.dbg.txClk.toBoolean)
-          fart.io.rxd #= true
-          waitUntil(!fart.uart.dbg.txClk.toBoolean)
+          UartSim.send_byte(fart.io.rxd, fart.uart.dbg.txClk, c.toInt)
         }
-        waitUntil(fart.io.synced.toBoolean)
-      }
+        for (c <- List('C', 'R', 'A', 'P')) {
+          //fart.dbg.waitResp #= false
+          val got = UartSim.recv_byte(fart.io.txd, fart.uart.dbg.txClk, fart.uart.dbg.noticeMeSenpai).toInt
 
+          println(f"${got.toChar} == $c?")
+          assert(
+            got == c.toInt
+          )
+        }
+        waitUntil(fart.dbg.synced.toBoolean)
+      }
   }
 }

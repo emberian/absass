@@ -1,3 +1,4 @@
 *.json
 *.fasm
 *.bit
+*.svg
