@@ -1,5 +1,7 @@
 use crate::isa::*;
 
+use std::io::Write;
+
 #[derive(Default)]
 pub struct Machine {
     pub regs: [Word; 16],
@@ -202,7 +204,8 @@ impl Machine {
                 10 => {
                     if write {
                         self.sr10 = Some(self.regs[reg]);
-                        println!("{}", char::from_u32(self.regs[reg] as u32).unwrap_or('?'));
+                        print!("{}", char::from_u32(self.regs[reg] as u32).unwrap_or('?'));
+                        std::io::stdout().flush().unwrap();
                     }
                 }
                 _ => (),

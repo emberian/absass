@@ -593,7 +593,7 @@ def cpu_test(w, _ignored=0):
     cpu_unit = traceSignals(cpu(addr, data_to_cpu, data_to_ram, mode, ready, valid, clk, halt, reset, debug_ready, debug_out, 2))
     try_convert(cpu_unit)
     mem = cpu_ram(
-            open('../assembler/hello.bin', 'rb').read(),
+            open('../assembler/hello16.bin', 'rb').read(),
             addr, data_to_ram, data_to_cpu, mode, ready, valid,
             min((8, w))
     )
@@ -609,7 +609,11 @@ def cpu_test(w, _ignored=0):
             yield delay(1)
             if debug_ready:
                 debug_ready.next = False
-                print(chr(debug_out))
+                try:
+                    out = chr(debug_out)
+                except Exception:
+                    out = f'{{{debug_out!r}}}'
+                print(out, end='', flush=True)
 
     return cpu_unit, mem, temporal
 

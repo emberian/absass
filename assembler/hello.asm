@@ -1,7 +1,7 @@
 # For assrs (probably)
-.WS 64
+#.WS 64
 # For myhdl
-#.WS 16
+.WS 16
 LI R4, chars
 
 loop:
@@ -17,4 +17,4 @@ done:
 	SR W, R5, 3
 
 chars:
-	.WORD "Hello world!", 0;
+	.WORD "Hello world!\n", 0;
