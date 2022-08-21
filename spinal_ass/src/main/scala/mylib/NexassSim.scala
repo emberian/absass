@@ -88,7 +88,7 @@ object FartSim {
     SimConfig.withWave
       .withConfig(
         SpinalConfig(defaultClockDomainFrequency =
-          FixedFrequency(Const.FPGAFREQ/1000)
+          FixedFrequency(Const.FPGAFREQ / 1000)
         )
       )
       .doSim(new Fart(8)) { fart =>
@@ -101,8 +101,14 @@ object FartSim {
           UartSim.send_byte(fart.io.rxd, fart.uart.dbg.txClk, c.toInt)
         }
         for (c <- List('C', 'R', 'A', 'P')) {
-          //fart.dbg.waitResp #= false
-          val got = UartSim.recv_byte(fart.io.txd, fart.uart.dbg.txClk, fart.uart.dbg.noticeMeSenpai).toInt
+          // fart.dbg.waitResp #= false
+          val got = UartSim
+            .recv_byte(
+              fart.io.txd,
+              fart.uart.dbg.txClk,
+              fart.uart.dbg.noticeMeSenpai
+            )
+            .toInt
 
           println(f"${got.toChar} == $c?")
           assert(
@@ -110,6 +116,21 @@ object FartSim {
           )
         }
         waitUntil(fart.dbg.synced.toBoolean)
+      }
+  }
+}
+
+object NexassSim {
+  def main(args: Array[String]) {
+    SimConfig.withWave
+      .withConfig(
+        SpinalConfig(defaultClockDomainFrequency =
+          FixedFrequency(Const.FPGAFREQ / 1000)
+        )
+      )
+      .doSim(new Nexass) { nexass =>
+        nexass.clockDomain.forkStimulus(2)
+        
       }
   }
 }

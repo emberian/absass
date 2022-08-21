@@ -46,76 +46,76 @@ class Debounce(dur: TimeNumber) extends Component {
   }
 }
 
+case class Nexlink() extends Bundle {
+  val led = out UInt (4 bits)
+  val dipsw = in UInt (4 bits)
+  val pb0 = in Bool ()
+  val pb1 = in Bool ()
+  val txd = out Bool ()
+  val rxd = in Bool ()
+  // val hr0 = new HRam()
+  // val hr1 = new HRam()
+}
+
 class Nexass extends Component {
+  val ws = 16
   val io = new Bundle {
-    val led = out UInt (4 bits)
-    val dipsw = in UInt (4 bits)
-    val gsrn = in Bool ()
-    val pushbutton0 = in Bool ()
-    val pushbutton1 = in Bool ()
-    val pmod0_1 = in Bool ()
-    val pmod0_2 = out Bool ()
-    // val hr0 = new HRam()
-    // val hr1 = new HRam()
+    val link = Nexlink()
   }
 
+  val reset_fart = new Debounce(500 ms)
+  reset_fart.io.crappy := !io.link.pb0
+
+  val reset_cpu = new Debounce(500 ms)
+  reset_cpu.io.crappy := !io.link.pb1
+
+  val fart = new ResetArea(reset_fart.io.pressed, false) {
+    val fart = new Fart(ws)
+
+    fart.dbg.waitResp := False
+  }
+
+  io.link.led(0) := io.link.pb0
+
+  io.link.led(1) := True
+
+  io.link.led(2) := !fart.fart.dbg.synced
+
+  io.link.led(3) := !fart.fart.dbg.noticeMeSenpai
+
+  fart.fart.io.rxd := io.link.rxd
+
+  val cpu = new ResetArea(reset_cpu.io.pressed || fart.fart.io.rst_cpu, false) {
+    val ass = new CPU(ws, true)
+
+    val plat = new TrivialPlat(ws, 1024)
+
+    ass.io <> plat.cpu
+  }
+
+  fart.fart.io.ass <> cpu.ass.dbg
+
+  io.link.txd := RegNext(!fart.fart.io.txd) addTag (crossClockDomain)
+  // INVERSION: we're feeding into an NPN BJT which inverts the voltage
+  // as it shifts 1.8V to 5V for the Arduino to sense.
+}
+
+class TopLvl extends Component {
   noIoPrefix()
-
-  val core_rst = False
-
-  val fart_rst = Reg(Bool()) addTag (crossClockDomain)
-  val cpu_rst = Reg(Bool()) addTag (crossClockDomain)
+  val io = Nexlink()
 
   val osc = new OSC_CORE(1)
   osc.io.HFOUTEN := True
   val core_clk =
     ClockDomain(
       osc.io.HFCLKOUT,
-      core_rst,
+      False,
       frequency = FixedFrequency(Const.FPGAFREQ)
     )
 
-  io.led := 15
-
   val top = new ClockingArea(core_clk) {
-    val reset_fart = new Debounce(500 ms)
-    reset_fart.io.crappy := !io.pushbutton0
-
-    fart_rst := reset_fart.io.pressed
-
-    val reset_cpu = new Debounce(500 ms)
-    reset_cpu.io.crappy := !io.pushbutton1
-
-    val fart = new ResetArea(reset_fart.io.pressed, false) {
-      val fart = new Fart(16)
-
-      fart.io.rd.ready := False
-      fart.io.wr.payload.assignDontCare()
-      fart.io.wr.valid := False
-      fart.dbg.waitResp := False
-    }
-
-    io.led(0) := io.pushbutton0
-
-    io.led(1) := True
-
-    io.led(2) := !fart.fart.dbg.synced
-
-    io.led(3) := !fart.fart.dbg.noticeMeSenpai
-
-    fart.fart.io.rxd := io.pmod0_1
-
-    val cpu = new ResetArea(reset_cpu.io.pressed || fart.fart.io.rst_cpu, false) {
-      val ass = new CPU(16, true)
-    }
-
-    fart.fart.io.ass <> cpu.ass.dbg
-
-    cpu_rst := reset_cpu.io.pressed
-
-    io.pmod0_2 := RegNext(!fart.fart.io.txd) addTag (crossClockDomain)
-    // INVERSION: we're feeding into an NPN BJT which inverts the voltage
-    // as it shifts 1.8V to 5V for the Arduino to sense.
+    val nexass = new Nexass
+    nexass.io.link <> io
   }
 }
 
@@ -134,6 +134,6 @@ class OSC_CORE(val div: Int) extends BlackBox {
 
 object Nexass {
   def main(args: Array[String]) {
-    SpinalVerilog(new Nexass).printPruned()
+    SpinalVerilog(new TopLvl).printPruned()
   }
 }

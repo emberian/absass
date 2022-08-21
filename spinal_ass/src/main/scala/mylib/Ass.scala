@@ -86,28 +86,30 @@ object Stages extends SpinalEnum {
 import Stages._
 
 case class DebugPort(ws: Int) extends Bundle with IMasterSlave {
-  val reg = Stream(UInt(4 bits))
-  val reg_content = Stream(UInt(ws bits))
-  val reg_write = UInt(ws bits)
-  val reg_dir_out = Bool()
+  val reg = Flow(UInt(4 bits))
+  val reg_content = Flow(UInt(ws bits))
+  val reg_write = Flow(UInt(ws bits))
+
   val cur_stage = Stages()
   val insn = UInt(16 bits)
   val sstep_insn = Bool()
+  val sstep = Bool()
+
   val halt = Bool()
 
   override def asMaster(): Unit = {
     out(cur_stage)
     master(reg_content)
-    slave(reg)
-    in(halt,reg_dir_out, reg_write, insn, sstep_insn)
+    slave(reg, reg_write)
+    in(halt, insn, sstep_insn, sstep)
   }
 }
 
 case class CPUIO(val ws: Int) extends Bundle with IMasterSlave {
-  val insn_addr = Stream(UInt(ws bits))
+  val insn_addr = Flow(UInt(ws bits))
   val insn_content = Stream(UInt(16 bits))
 
-  val mem_addr = Stream(UInt(ws bits))
+  val mem_addr = Flow(UInt(ws bits))
   val read_port = Stream(UInt(ws bits))
   val write_port = Stream(UInt(ws bits))
   val mem_is_write = Bool()
@@ -170,19 +172,40 @@ class CPU(val ws: Int, val fancy: Boolean) extends Module {
   io.write_port.payload := 0
   io.mem_is_write := False
   io.read_port.ready := False
-  dbg.reg.ready := True
   dbg.cur_stage := state
+
+  dbg.reg_content.payload.setAsReg()
+  dbg.reg_content.valid.setAsReg()
 
   when(dbg.reg.valid) {
     dbg.reg_content.payload := regs(dbg.reg.payload)
     dbg.reg_content.valid := True
   }.otherwise {
-    dbg.reg_content.payload.assignDontCare()
-    dbg.reg_content.valid := False
+    dbg.reg_content.valid := dbg.reg.valid
   }
 
-  when(!dbg.halt && state === s_idle) {
-    state := s_fetch
+  when(dbg.reg.valid && dbg.reg_write.valid) {
+    regs(dbg.reg.payload) := dbg.reg_write.payload
+  }
+
+  val halt = RegInit(False)
+  when(dbg.halt) {
+    halt := True
+  }
+
+  when(state === s_idle) {
+    when(!halt) {
+      state := s_fetch
+    } otherwise {
+      when(dbg.sstep_insn) {
+        state := s_execute
+        inst := dbg.insn
+      } otherwise {
+        when(dbg.sstep) {
+          state := s_fetch
+        }
+      }
+    }
   }
 
   when(state === s_fetch) {
@@ -202,12 +225,6 @@ class CPU(val ws: Int, val fancy: Boolean) extends Module {
   }
 
   val result = Reg(UInt(ws bits))
-  val halt = Reg(Bool())
-
-  when(dbg.halt) {
-    halt := True
-  }
-
   result := 0
 
   when(state === s_execute) {
@@ -423,14 +440,6 @@ class CPU(val ws: Int, val fancy: Boolean) extends Module {
       state := s_fetch
     }
   }
-}
-
-class CPUWrapper(val ws: Int, val fancy: Boolean) extends Module {
-  val io = new Bundle {}
-
-  val cpu = new CPU(ws, fancy)
-
-  val mem = Mem(UInt(ws bits), 256)
 }
 
 object Icestick {

@@ -14,10 +14,10 @@ all: $(PROJ).bit
 vvml.pdc: mkpdc
 	./mkpdc > vvml.pdc
 
-$(PROJ).json: ../spinal_ass/Nexass.v $(PROJ).v $(EXTRA_VERILOG) $(MEM_INIT_FILES) vvml.pdc
+$(PROJ).json: ../spinal_ass/TopLvl.v $(PROJ).v $(EXTRA_VERILOG) $(MEM_INIT_FILES) vvml.pdc
 	#(cd ../spinal_ass && sbt 'runMain absass.Nexass')
-	cp ../spinal_ass/Nexass.v .
-	sed -e '/input\s*clk/d' -e '/input\s*reset/d' -e '/assign core_rst/a wire clk;assign clk = osc_HFCLKOUT;' -i Nexass.v
+	cp ../spinal_ass/TopLvl.v .
+	sed -e '/input\s*clk/d' -e '/input\s*reset/d' -e '/assign core_rst/a wire clk;assign clk = osc_HFCLKOUT;' -i TopLvl.v
 	$(YOSYS) -ql $(PROJ)_syn.log -p "synth_nexus $(SYNTH_ARGS) -top $(PROJ) -json $(PROJ).json" $(PROJ).v $(EXTRA_VERILOG)
 
 $(PROJ).fasm: $(PROJ).json $(PDC)

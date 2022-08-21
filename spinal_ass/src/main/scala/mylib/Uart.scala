@@ -68,10 +68,9 @@ object UartSim {
   * the Arduino is ready.
   */
 class Uart extends Component {
-  val Byte = UInt(8 bits)
   val io = new Bundle {
-    val rd = master Stream (Byte)
-    val wr = slave Stream (Byte)
+    val rd = master Stream (UInt(8 bits))
+    val wr = slave Stream (UInt(8 bits))
     val txd = out Bool ()
     val rxd = in Bool ()
   }
