@@ -17,4 +17,4 @@ done:
 	SR W, R5, 3
 
 chars:
-	.WORD 'H', 'e', 'l', 'l', 'o', ' ', 'w', 'o', 'r', 'l', 'd', '!', 0;
+	.WORD "Hello world!", 0;

@@ -191,6 +191,7 @@ class Assembler
 		if s\sub(1, 1) == "'"
 			return @die "expected closing quote", s unless s\sub(3, 3) == "'"
 			return @ok s\byte(2), s\sub(4)
+		-- A hex number
 		ixs, ixe = s\find "^[%da-fA-FxX]+"
 		if ixs
 			num = tonumber s\sub ixs, ixe
@@ -344,15 +345,58 @@ class Assembler
 				s = s\sub 2
 				break
 			num = @p_expr s
-			break unless num
-			table.insert nums, num.val
-			s = @optcomma num.rest
+			if num
+				table.insert nums, num.val
+				s = @optcomma num.rest
+				continue
+			str = @p_str s
+			if str
+				v = str.val
+				for ix = 1, #v
+					table.insert nums, v\byte ix
+				s = @optcomma str.rest
+				continue
+			break
 		@ok nums, s
 
 	p_imm: (s) =>
 		s = @trim s
 		return @fail! unless s\sub(1, 1) == "$"
 		@p_expr s\sub 2
+
+	@ESCAPES:
+		n: '\n'
+		r: '\r'
+		t: '\t'
+		v: '\v'
+		b: '\b'
+		f: '\f'
+		["'"]: "'"
+		['"']: '"'
+		['\\']: '\\'
+
+	@ESCAPE_CHAR: "\\"
+
+	p_str: (s) =>
+		return @fail! unless s\sub(1, 1) == '"'
+		ix = 2
+		seq = {}
+		while true
+			return @die "EOF in string", s if ix > #s
+			c = s\sub ix, ix
+			break if c == '"'
+			if c == @@ESCAPE_CHAR
+				ix += 1
+				c = s\sub ix, ix
+				if esc = @@ESCAPES[c]
+					table.insert seq, esc
+				else
+					table.insert seq, @@ESCAPE_CHAR
+					table.insert seq, c
+			else
+				table.insert seq, c
+			ix += 1
+		@ok table.concat(seq), s\sub ix + 1
 
 	@INSNS: {}
 	DECL_INSN = (nm, parse) -> @INSNS[nm] = {
@@ -809,7 +853,6 @@ if arg
 	assembler\run source
 	assembler\info!
 	f = io.open arg[1], "wb"
-	for i, b in *assembler.buf
-		f\write string.char b
+	f\write string.char b for b in *assembler.buf
 
 {:Assembler}
