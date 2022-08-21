@@ -7,6 +7,8 @@ pub struct Machine {
     pub ivt: Reg,
     pub cycles: Word,
     pub insns: Word,
+    pub bps: [Option<Word>; 16],
+    pub sr10: Option<Word>,
 }
 
 #[derive(Debug, Hash, Clone, Copy)]
@@ -20,6 +22,10 @@ impl Machine {
 
     pub fn pc(&self) -> usize {
         self.regs[0] as usize
+    }
+
+    pub fn reset(&mut self) {
+        *self = Machine::default();
     }
 
     pub fn exec(&mut self, i: Insn) -> StepOut {
@@ -195,6 +201,7 @@ impl Machine {
                 }
                 10 => {
                     if write {
+                        self.sr10 = Some(self.regs[reg]);
                         println!("{}", char::from_u32(self.regs[reg] as u32).unwrap_or('?'));
                     }
                 }
@@ -220,8 +227,17 @@ impl Machine {
         self.exec(i)
     }
 
+    pub fn check_bps(&self) -> Option<u8> {
+        for i in 0..self.regs.len() {
+            if Some(self.regs[i]) == self.bps[i] {
+                return Some(i as u8);
+            }
+        }
+        None
+    }
+
     pub fn run(&mut self) {
-        while self.pc() < self.memory.len() {
+        while self.pc() + 1 < self.memory.len() {
             #[cfg(debug_assertions)]
             {
                 for r in 0..16 {
@@ -229,8 +245,9 @@ impl Machine {
                 }
                 println!();
             }
-            if let StepOut::Halt = self.step() {
-                break;
+            match self.step() {
+                StepOut::Halt => break,
+                StepOut::Continue => (),
             }
         }
     }
