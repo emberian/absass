@@ -809,7 +809,7 @@ if arg
 	assembler\run source
 	assembler\info!
 	f = io.open arg[1], "wb"
-	for i, b in assembler.buf
-		io.write f b
+	for i, b in pairs assembler.buf
+		f\write string.char b
 
 {:Assembler}
