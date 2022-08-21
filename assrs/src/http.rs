@@ -145,6 +145,7 @@ fn run_mach(
                 }
                 Req::Run => {
                     halted = false;
+                    tx.send(Resp::Ok).unwrap();
                 }
                 Req::Poll => unreachable!(),
             },
