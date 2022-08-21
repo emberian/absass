@@ -1,7 +1,3 @@
-# For assrs (probably)
-#.WS 64
-# For myhdl
-.WS 16
 LI R4, chars
 
 loop:
