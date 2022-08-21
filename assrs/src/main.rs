@@ -1,3 +1,75 @@
-fn main() {
-    assrs::main()
+use std::io::prelude::*;
+use assrs::*;
+
+pub fn main() {
+    match std::env::args().nth(1).as_deref() {
+        Some("run") => {
+            let mut m = Machine::default();
+            if let Some(filename) = std::env::args().nth(2) {
+                let mut rdr = std::fs::File::open(filename).expect("opening program file");
+                rdr.read_to_end(&mut m.memory).unwrap();
+            } else {
+                std::io::stdin()
+                    .read_to_end(&mut m.memory)
+                    .expect("reading program file");
+            }
+            m.run();
+        }
+        Some("disasm") => {
+            let mut insn_buf = [0u8; 2];
+            let mut i = std::io::stdin().lock();
+            while let Ok(2) = i.read(&mut insn_buf) {
+                println!(
+                    "{:?}",
+                    Insn::decode((insn_buf[0] as u16) << 8 | insn_buf[1] as u16)
+                );
+            }
+        }
+        Some("dishex") => {
+            for l in std::io::stdin().lock().lines() {
+                let l = l.unwrap();
+                let l = l.trim_start_matches("0x");
+
+                let iv = Insn::decode(u16::from_str_radix(l, 16).unwrap());
+                println!("{:?}", iv);
+            }
+        }
+
+        Some("gen_opcode") => match std::env::args().nth(2).as_deref() {
+            Some("html") => {
+                println!("<html>");
+                println!("<head><style type=\"text/css\">.valid {{ background-color: #0f03; }} table {{ border-collapse: collapse; }} table td {{ border: 1px solid #000; }}</style></head>");
+                println!("<body><table><tr>");
+                for insn in 0..=std::u16::MAX {
+                    if insn != 0 && insn % 256 == 0 {
+                        println!("</tr></tr>")
+                    }
+                    let ins = Insn::decode(insn);
+                    match ins.brief() {
+                        None => println!("<td></td><!--{:04x}-->", insn),
+                        Some(b) => println!("<td class=\"valid\">{}</td><!--{:04x}-->", b, insn),
+                    }
+                }
+                println!("</tr></table></body></html>");
+            }
+            Some("ppm") => {
+                println!("P3");
+                println!("256 256 255");
+                for insn in 0..=std::u16::MAX {
+                    let insn = Insn::decode(insn);
+                    let col = insn.color();
+                    println!("{} {} {}", col.0, col.1, col.2);
+                }
+            }
+            Some(_) => {
+                eprintln!("bad format; try html, ppm");
+            }
+            None => {
+                eprintln!("no format argument");
+            }
+        },
+
+        Some(_) => eprintln!("no such command!"),
+        None => eprintln!("no command given!"),
+    }
 }
