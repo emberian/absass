@@ -346,3 +346,4 @@ hs_err_pid*
 obj_dir
 .bloop
 radiass
+*.bin

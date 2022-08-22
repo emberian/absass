@@ -64,10 +64,10 @@ class Nexass extends Component {
   }
 
   val reset_fart = new Debounce(500 ms)
-  reset_fart.io.crappy := !io.link.pb0
+  reset_fart.io.crappy := io.link.pb0
 
   val reset_cpu = new Debounce(500 ms)
-  reset_cpu.io.crappy := !io.link.pb1
+  reset_cpu.io.crappy := io.link.pb1
 
   val fart = new ResetArea(reset_fart.io.pressed, false) {
     val fart = new Fart(ws)
@@ -86,7 +86,7 @@ class Nexass extends Component {
   fart.fart.io.rxd := io.link.rxd
 
   val cpu = new ResetArea(reset_cpu.io.pressed || fart.fart.io.rst_cpu, false) {
-    val ass = new CPU(ws, true)
+    val ass = new CPU(ws, false)
 
     val plat = new TrivialPlat(ws, 1024)
 
@@ -102,7 +102,14 @@ class Nexass extends Component {
 
 class TopLvl extends Component {
   noIoPrefix()
-  val io = Nexlink()
+  val io = new Bundle {
+    val led = out UInt (4 bits)
+    val dipsw = in UInt (4 bits)
+    val pushbutton0 = in Bool ()
+    val pushbutton1 = in Bool ()
+    val pmod0_1 = in Bool ()
+    val pmod0_2 = out Bool ()
+  }
 
   val osc = new OSC_CORE(1)
   osc.io.HFOUTEN := True
@@ -114,8 +121,13 @@ class TopLvl extends Component {
     )
 
   val top = new ClockingArea(core_clk) {
-    val nexass = new Nexass
-    nexass.io.link <> io
+    val nx = new Nexass
+    io.led := nx.io.link.led
+    nx.io.link.dipsw := io.dipsw
+    nx.io.link.pb0 := !io.pushbutton0
+    nx.io.link.pb1 := !io.pushbutton1
+    nx.io.link.rxd := io.pmod0_1
+    io.pmod0_2 := nx.io.link.txd
   }
 }
 

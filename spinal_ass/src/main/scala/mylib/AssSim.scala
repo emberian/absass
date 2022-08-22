@@ -234,34 +234,47 @@ object ComparisonSim {
 object CPUSim {
   def main(args: Array[String]) {
     SimConfig.withWave.doSim(new CPU(8, true)) { cpu =>
-      cpu.clockDomain.forkStimulus(period = 10)
+      cpu.clockDomain.forkStimulus(period = 2)
 
-      def exec_insn(c: CPU, i: Int) = {
-        assert(c.io.insn_content.ready == 1)
+      def exec_insn(c: CPU, i: Int, exp_pc: Int) = {
+        c.dbg.sstep #= true
+        waitUntil(c.io.insn_content.ready.toBoolean == true)
+        assert(c.io.insn_addr.payload.toBigInt == exp_pc)
         c.io.insn_content.payload #= i
+        sleep(1)
         c.io.insn_content.valid #= true
+        waitUntil(c.dbg.cur_stage.toBigInt == 1)
+        c.dbg.sstep #= false
+        sleep(2)
+        c.io.insn_content.valid #= false
+        waitUntil(c.dbg.cur_stage.toBigInt == 0)
         c.clockDomain.waitRisingEdge()
-        c.io.insn_content.valid #= true
-        waitUntil(c.dbg.cur_stage == 1)
       }
       def pc(c: CPU): BigInt = {
-        //assert(c.io.insn_addr.valid == 1)
+        // assert(c.io.insn_addr.valid == 1)
         c.io.insn_addr.payload.toBigInt
       }
 
-      cpu.dbg.halt #= false
-      cpu.clockDomain.waitRisingEdge()
+      cpu.dbg.halt #= true
+      cpu.io.insn_content.valid #= false
+      cpu.io.insn_content.payload #= 0
+      cpu.io.read_port.valid #= false
+      cpu.io.read_port.payload #= 0
+      cpu.io.write_port.ready #= false
+      cpu.dbg.sstep_insn #= false
+      cpu.dbg.sstep #= false
 
-      assert(pc(cpu) == 0)
-      exec_insn(cpu, 0x1f11)
+      cpu.clockDomain.waitRisingEdge(3)
 
-      assert(cpu.regs(1) == 0xf)
-      cpu.regs(2) #= 0xf
-      exec_insn(cpu, 0x1a23)
-      assert(cpu.regs(3) == 0xf)
+      exec_insn(cpu, 0x1f11, 0)
 
-      exec_insn(cpu, 0xcafe)
-      assert(cpu.regs(0xe) == 0xaf)
+      assert(cpu.regs(1).toBigInt == 0xff)
+      cpu.regs(2) #= 0xff
+      exec_insn(cpu, 0x1a23, 2)
+      assert(cpu.regs(3).toBigInt == 0xff)
+
+      exec_insn(cpu, 0xcafe, 4)
+      assert(cpu.regs(0xe).toBigInt == 0xaf)
     }
   }
 }

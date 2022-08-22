@@ -1,4 +1,4 @@
-PROJ=Nexass
+PROJ=TopLvl
 DEVICE=LIFCL-40-8MG289
 PDC=vvml.pdc
 
@@ -14,10 +14,10 @@ all: $(PROJ).bit
 vvml.pdc: mkpdc
 	./mkpdc > vvml.pdc
 
-$(PROJ).json: ../spinal_ass/TopLvl.v $(PROJ).v $(EXTRA_VERILOG) $(MEM_INIT_FILES) vvml.pdc
+$(PROJ).json: ../spinal_ass/$(PROJ).v $(PROJ).v $(EXTRA_VERILOG) $(MEM_INIT_FILES) vvml.pdc
 	#(cd ../spinal_ass && sbt 'runMain absass.Nexass')
-	cp ../spinal_ass/TopLvl.v .
-	sed -e '/input\s*clk/d' -e '/input\s*reset/d' -e '/assign core_rst/a wire clk;assign clk = osc_HFCLKOUT;' -i TopLvl.v
+	cp ../spinal_ass/$(PROJ).v ../spinal_ass/TopLvl.v_toplevel_top_nx_cpu_ass_regs.bin .
+	sed -e '/input\s*clk/d' -e '/input\s*reset/d' -e '/assign core_rst/a wire clk;assign clk = osc_HFCLKOUT;' -i $(PROJ).v
 	$(YOSYS) -ql $(PROJ)_syn.log -p "synth_nexus $(SYNTH_ARGS) -top $(PROJ) -json $(PROJ).json" $(PROJ).v $(EXTRA_VERILOG)
 
 $(PROJ).fasm: $(PROJ).json $(PDC)

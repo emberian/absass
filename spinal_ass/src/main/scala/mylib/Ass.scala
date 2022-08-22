@@ -3,7 +3,11 @@ package absass
 import spinal.core._
 import spinal.lib._
 
+import spinal.lib.fsm._
+import spinal.sim._
+import spinal.core.sim._
 import scala.util.Random
+import spinal.core.sim.SimPublic
 
 //Hardware definition
 class LogicUnit(val ws: Int) extends Component {
@@ -32,32 +36,39 @@ class ArithUnit(val ws: Int, val fancy: Boolean) extends Module {
     val s = in UInt (ws bits)
     val op = in(ArithOps())
     val res = out UInt (ws bits)
+    val go = in Bool ()
+    val ready = out Bool ()
   }
 
   val signed_max = (1 << (ws - 1) - 1)
-
-  switch(io.op) {
-    is(l_add) { io.res := io.d + io.s }
-    is(l_sub) { io.res := io.d - io.s }
-    is(l_shl) { io.res := io.d |<< io.s }
-    is(l_shr) { io.res := io.d |>> io.s }
-    is(l_asr) {
-      when(io.s < ws) { io.res := io.d >> io.s }
-        .otherwise { io.res.setAllTo(io.d(ws - 1)) }
-    }
-    is(l_mul) {
-      if (fancy) { io.res := (io.d * io.s).resize(ws bits) }
-    }
-    is(l_div) {
-      when(io.s =/= 0) { if (fancy) { io.res := io.d / io.s } }.otherwise {
-        io.res.setAll()
+  io.res := 0
+  when(io.go) {
+    switch(io.op) {
+      is(l_add) { io.res := io.d + io.s }
+      is(l_sub) { io.res := io.d - io.s }
+      is(l_shl) { io.res := io.d |<< io.s }
+      is(l_shr) { io.res := io.d |>> io.s }
+      is(l_asr) {
+        when(io.s < ws) { io.res := io.d >> io.s }
+          .otherwise { io.res.setAllTo(io.d(ws - 1)) }
+      }
+      is(l_mul) {
+        if (fancy) { io.res := (io.d * io.s).resize(ws bits) }
+      }
+      is(l_div) {
+        when(io.s =/= 0) { if (fancy) { io.res := io.d / io.s } }.otherwise {
+          io.res.setAll()
+        }
+      }
+      is(l_mod) {
+        when(io.s =/= 0) { if (fancy) { io.res := io.d % io.s } }.otherwise {
+          io.res := 0
+        }
       }
     }
-    is(l_mod) {
-      when(io.s =/= 0) { if (fancy) { io.res := io.d % io.s } }.otherwise {
-        io.res := 0
-      }
-    }
+    io.ready := True
+  } otherwise {
+    io.ready := False
   }
 }
 
@@ -86,10 +97,11 @@ object Stages extends SpinalEnum {
 import Stages._
 
 case class DebugPort(ws: Int) extends Bundle with IMasterSlave {
-  val reg = Flow(UInt(4 bits))
-  val reg_content = Flow(UInt(ws bits))
-  val reg_write = Flow(UInt(ws bits))
-
+  val reg_addr = UInt(4 bits)
+  val reg_r = UInt(ws bits)
+  val reg_w = UInt(ws bits)
+  val wren = Bool()
+  val rgen = Bool()
   val cur_stage = Stages()
   val insn = UInt(16 bits)
   val sstep_insn = Bool()
@@ -98,10 +110,8 @@ case class DebugPort(ws: Int) extends Bundle with IMasterSlave {
   val halt = Bool()
 
   override def asMaster(): Unit = {
-    out(cur_stage)
-    master(reg_content)
-    slave(reg, reg_write)
-    in(halt, insn, sstep_insn, sstep)
+    out(cur_stage, reg_r)
+    in(halt, insn, sstep_insn, sstep, reg_addr, reg_w, wren, rgen)
   }
 }
 
@@ -125,15 +135,14 @@ class CPU(val ws: Int, val fancy: Boolean) extends Module {
   val io = master(CPUIO(ws))
   val dbg = master(DebugPort(ws))
 
-  val state = RegInit(s_idle)
-
   val arith = new ArithUnit(ws, fancy)
   val logic = new LogicUnit(ws)
   val compare = new ComparisonUnit(ws)
 
-  arith.io.d := 0
-  arith.io.s := 0
-  arith.io.op := l_add
+  arith.io.d.assignDontCare()
+  arith.io.s.assignDontCare()
+  arith.io.op.assignDontCare()
+  arith.io.go := False
 
   logic.io.p.assignDontCare()
   logic.io.q.assignDontCare()
@@ -146,8 +155,6 @@ class CPU(val ws: Int, val fancy: Boolean) extends Module {
   compare.io.eq.assignDontCare()
   compare.io.sn.assignDontCare()
 
-  val regs = Vec(Reg(UInt(ws bits)), 16)
-
   val pc_reg = 0
 
   val pc = Reg(UInt(ws bits))
@@ -155,12 +162,8 @@ class CPU(val ws: Int, val fancy: Boolean) extends Module {
 
   val dl = Reg(UInt(4 bits))
   val sp = Reg(UInt(4 bits))
-
-  val inst_ret = Reg(UInt(ws bits)) init (0)
-  inst_ret.allowOverride
-  val cycl_ct = Reg(UInt(ws bits)) init (0)
-
-  cycl_ct := cycl_ct + 1
+  val dl_v = Reg(UInt(ws bits))
+  val sp_v = Reg(UInt(ws bits))
 
   io.insn_addr.valid := False
   io.insn_addr.payload := 0
@@ -172,297 +175,512 @@ class CPU(val ws: Int, val fancy: Boolean) extends Module {
   io.write_port.payload := 0
   io.mem_is_write := False
   io.read_port.ready := False
-  dbg.cur_stage := state
+  dbg.cur_stage.setAsReg()
 
-  dbg.reg_content.payload.setAsReg()
-  dbg.reg_content.valid.setAsReg()
+  /** Architectural registers */
+  val ivt = Reg(UInt(ws bits)) init (0)
+  val halt = RegInit(True)
+  val inst_ret = Reg(UInt(ws bits)) init (0)
+  val cycl_ct = Reg(UInt(ws bits)) init (0)
 
-  when(dbg.reg.valid) {
-    dbg.reg_content.payload := regs(dbg.reg.payload)
-    dbg.reg_content.valid := True
-  }.otherwise {
-    dbg.reg_content.valid := dbg.reg.valid
+  cycl_ct := cycl_ct + 1
+  when(dbg.halt) { halt := dbg.halt }
+  when(dbg.halt.fall) {
+    halt := False
   }
 
-  when(dbg.reg.valid && dbg.reg_write.valid) {
-    regs(dbg.reg.payload) := dbg.reg_write.payload
-  }
+  val regs = Mem(UInt(ws bits), 16) init (Vec(U(0, ws bits), 16))
 
-  val halt = RegInit(False)
-  when(dbg.halt) {
-    halt := True
-  }
+  val reg_addr = UInt(4 bits)
+  val reg_w = UInt(ws bits)
+  val reg_r = UInt(ws bits)
+  val wren = Bool
+  val rgen = Bool
 
-  when(state === s_idle) {
-    when(!halt) {
-      state := s_fetch
-    } otherwise {
-      when(dbg.sstep_insn) {
-        state := s_execute
-        inst := dbg.insn
-      } otherwise {
-        when(dbg.sstep) {
-          state := s_fetch
+  reg_addr.assignDontCare()
+  reg_w.assignDontCare()
+  wren := False
+  rgen := False
+
+  val reg_r_wire = regs.readWriteSync(reg_addr, reg_w, rgen, wren)
+
+  reg_r := reg_r_wire
+  dbg.reg_r := reg_r_wire
+
+  when(halt) {
+    reg_w := dbg.reg_w
+    wren := dbg.wren
+    reg_addr := dbg.reg_addr
+    rgen := dbg.rgen
+  } otherwise {}
+
+  // register every memory operand because, well, you know,
+  val dl_sp_access = RegInit(False)
+  val dl_sp_writeback = RegInit(False)
+  val sr_access = RegInit(False)
+  val sr_writeback = RegInit(False)
+  val cond_access = RegInit(False)
+  val cond_addr = Reg(UInt(4 bits))
+  val sr_addr = Reg(UInt(4 bits))
+  val old_dst_val = Reg(UInt(ws bits))
+  val sr_out = Reg(UInt(ws bits))
+  val cond = Reg(UInt(ws bits))
+  val other_res = Reg(UInt(ws bits))
+  val other_writeback = RegInit(False)
+  val pc_writeback = RegInit(False)
+
+  val reg_access = new StateMachine {
+    val watch: State = new State with EntryPoint {
+      whenIsActive {
+        when(dl_sp_access) {
+          goto(rd_dl_sp)
         }
+        when(dl_sp_writeback) {
+          goto(wr_dl_sp)
+        }
+        when(sr_access) {
+          goto(rd_sr)
+        }
+        when(sr_writeback) {
+          goto(wr_sr)
+        }
+        when(cond_access) {
+          goto(rd_cond)
+        }
+        when(other_writeback) {
+          goto(wr_other)
+        }
+        when(pc_writeback) {
+          goto(wr_pc)
+        }
+      }
+    }
+
+    val rd_dl_sp: State = new State {
+      val didsp = RegInit(False)
+      val diddl = RegInit(False)
+      whenIsActive {
+        rgen := True
+        when(!diddl) {
+          reg_addr := dl
+          diddl := True
+        } otherwise {
+          when(!didsp) {
+            dl_v := reg_r
+            reg_addr := sp
+            didsp := True
+          } otherwise {
+            sp_v := reg_r
+            didsp := False
+            diddl := False
+            dl_sp_access := False
+            goto(watch)
+          }
+        }
+      }
+    }
+
+    val wr_dl_sp: State = new State {
+      val didsp = RegInit(False)
+      val diddl = RegInit(False)
+      whenIsActive {
+        rgen := True
+        wren := True
+        when(!diddl) {
+          reg_addr := dl
+          reg_w := dl_v
+          diddl := True
+        } otherwise {
+          when(!didsp) {
+            reg_addr := sp
+            reg_w := sp_v
+            didsp := True
+          } otherwise {
+            didsp := False
+            diddl := False
+            dl_sp_writeback := False
+            goto(watch)
+          }
+        }
+      }
+    }
+
+    val rd_sr = new State {
+      onEntry { rgen := True; reg_addr := sr_addr }
+      whenIsActive {
+        old_dst_val := reg_r
+        sr_access := False
+        goto(watch)
+      }
+    }
+    val wr_sr = new State {
+      whenIsActive {
+        wren := True; rgen := True; reg_addr := sr_addr; reg_w := sr_out
+        sr_writeback := False
+        goto(watch)
+      }
+    }
+    val rd_cond = new State {
+      onEntry { rgen := True; reg_addr := cond_addr }
+      whenIsActive {
+        cond := reg_r
+        cond_access := False
+        goto(watch)
+      }
+    }
+    val wr_other = new State {
+      onEntry { wren := True; rgen := True; reg_addr := dl; reg_w := other_res }
+      whenIsActive {
+        other_writeback := False
+        goto(watch)
+      }
+    }
+    val wr_pc = new State {
+      onEntry { wren := True; rgen := True; reg_addr := pc_reg; reg_w := pc }
+      whenIsActive {
+        pc_writeback := False
+        goto(watch)
       }
     }
   }
 
-  when(state === s_fetch) {
-    pc := regs(pc_reg) + 2
-    io.insn_addr.payload := regs(pc_reg)
-    io.insn_addr.valid := True
-    io.insn_content.ready := True
-    when(io.insn_content.valid) {
-      inst := io.insn_content.payload
-      io.insn_addr.valid := False
-      io.insn_content.ready := False
-      state := s_execute
-    }
-  }.otherwise {
-    io.insn_content.ready := False
-    io.insn_addr.valid := False
-  }
+  reg_access.setEncoding(binaryOneHot)
 
-  val result = Reg(UInt(ws bits))
-  result := 0
-
-  when(state === s_execute) {
-    dl := inst(3 downto 0)
-    sp := inst(7 downto 4)
-
-    printf(s"executing ${inst}, pc = ${regs(0)}\n")
-
-    when(inst(15 downto 14) === 1) {
-      // data transfer
-      val dindir = inst(10)
-      val dmode = inst(9 downto 8)
-      val sindir = inst(13)
-      val smode = inst(12 downto 11)
-
-      val scont = Reg(UInt(ws bits)) init (0)
-      val sready = Reg(Bool()) init (False)
-      val dready = Reg(Bool()) init (False)
-      val pc_stowed = Reg(Bool()) init (False)
-
-      regs(pc_reg) := pc
-      pc_stowed := True
-
-      when(pc_stowed) {
-        dready := False
-        sready := False
-        when(sindir) {
-          val pres = Reg(Bool()) init (False)
-          val sc = 0
-          when(smode === 2) {
-            regs(sp) := regs(sp) - (ws / 8); sc := regs(sp) - (ws / 8)
-          } otherwise { sc := regs(sp) }
-          io.mem_addr.valid := True
-          io.mem_addr.payload := sc
-          io.read_port.ready := True
-          io.mem_is_write := False
-          when(io.read_port.valid) {
-            switch(smode) {
-              is(1) { regs(sp) := regs(sp) + (ws / 8) }
-              is(3) { regs(sp) := regs(sp) - (ws / 8) }
+  val ctrl = new StateMachine {
+    val idle: State = new State with EntryPoint {
+      onEntry { dbg.cur_stage := s_idle }
+      whenIsActive {
+        when(!halt) {
+          goto(fetch)
+        } otherwise {
+          when(dbg.sstep_insn) {
+            goto(execute)
+            inst := dbg.insn
+          } otherwise {
+            when(dbg.sstep) {
+              goto(fetch)
             }
-            scont := io.read_port.payload
-            sready := True
           }
-        }.otherwise {
-          switch(smode) {
-            is(2) { scont := regs(sp) - (ws / 8) }
-            is(0) { scont := regs(sp) }
-            is(3) { scont := regs(sp); regs(sp) := regs(sp) - (ws / 8) }
-            is(1) { scont := regs(sp); regs(sp) := regs(sp) + (ws / 8) }
-          }
-          sready := True
         }
-        when(sready) {
-          io.mem_addr.valid := False
-          io.read_port.ready := False
-          when(dindir) {
-            val daddr = 0
-            when(dmode === 2) {
-              regs(dl) := regs(dl) - (ws / 8); daddr := regs(dl) - (ws / 8)
-            } otherwise { daddr := regs(dl) }
-            io.mem_addr.valid := True
-            io.mem_addr.payload := daddr
-            io.write_port.valid := True
-            io.mem_is_write := True
-            io.write_port.payload := scont
-            when(io.write_port.ready) {
-              switch(dmode) {
-                is(1) { regs(dl) := regs(dl) + (ws / 8) }
-                is(3) { regs(dl) := regs(dl) - (ws / 8) }
+      }
+
+      val fetch = new State {
+        onEntry { reg_addr := pc_reg }
+        whenIsActive {
+          dbg.cur_stage := s_fetch
+          pc := reg_r + 2
+          io.insn_addr.payload := reg_r
+          io.insn_addr.valid := True
+          io.insn_content.ready := True
+          inst := io.insn_content.payload
+          when(io.insn_content.valid) {
+            dl := io.insn_content.payload(3 downto 0)
+            sp := io.insn_content.payload(7 downto 4)
+            dl_sp_access := True
+            io.insn_addr.valid := False
+            io.insn_content.ready := False
+            goto(execute)
+          }
+        }
+      }
+      val did_other = RegInit(False)
+
+      val execute: State = new StateFsm({
+
+        val exec_ctrl = new StateMachine {
+          val wait_regs: State = new State with EntryPoint {
+            whenIsActive {
+              when(!dl_sp_access) {
+                goto(decode)
+              }
+            }
+          }
+          val decode: State = new State {
+            whenIsActive {
+              when(inst(15 downto 14) === 1) {
+                goto(do_xf)
+              }.otherwise {
+                when(inst(15 downto 13) === 5) {
+                  goto(do_sr)
+                }.otherwise {
+                  goto(others)
+                }
+              }
+            }
+          }
+
+          val do_xf: State = new StateFsm({
+            val xf_ctrl = new StateMachine {
+              val dindir = inst(10)
+              val dmode = inst(9 downto 8)
+              val sindir = inst(13)
+              val smode = inst(12 downto 11)
+              val dl_cp = Reg(UInt(ws bits))
+              val sp_cp = Reg(UInt(ws bits))
+              val start: State = new State with EntryPoint {
+                onEntry { pc_writeback := True }
+                whenIsActive {
+                  dl_cp := dl_v
+                  sp_cp := sp_v
+                  when(sindir) {
+                    goto(src_mem)
+                  } otherwise {
+                    goto(src_reg)
+                  }
+                }
+              }
+              val srcval = Reg(UInt(ws bits))
+              val src_mem: State = new State {
+                onEntry {
+                  when(smode === 2) {
+                    sp_cp := sp_v - (ws / 8)
+                  }
+                }
+                onExit {
+                  switch(smode) {
+                    is(1) { sp_cp := sp_cp + (ws / 8) }
+                    is(3) { sp_cp := sp_cp - (ws / 8) }
+                  }
+                }
+                whenIsActive {
+                  io.mem_addr.valid := True
+                  io.mem_addr.payload := sp_cp
+                  io.read_port.ready := True
+                  io.mem_is_write := False
+                  when(io.read_port.valid) {
+                    srcval := io.read_port.payload
+
+                    when(dindir) {
+                      goto(dst_mem)
+                    } otherwise {
+                      goto(dst_reg)
+                    }
+                  }
+                }
+              }
+              val src_reg: State = new State {
+                whenIsActive {
+                  switch(smode) {
+                    is(2) { srcval := sp_cp - (ws / 8) }
+                    is(0) { srcval := sp_cp }
+                    is(3) {
+                      srcval := sp_cp; sp_cp := sp_cp - (ws / 8)
+                    }
+                    is(1) {
+                      srcval := sp_cp; sp_cp := sp_cp + (ws / 8)
+                    }
+                  }
+
+                  when(dindir) {
+                    goto(dst_mem)
+                  } otherwise {
+                    goto(dst_reg)
+                  }
+                }
               }
 
-              dready := True
+              val dst_mem: State = new State {
+                val daddr = 0
+
+                onEntry {
+                  when(dmode === 2) {
+                    dl_cp := dl_cp - (ws / 8)
+                  }
+                }
+                onExit {
+                  switch(dmode) {
+                    is(1) { dl_cp := dl_cp + (ws / 8) }
+                    is(3) { dl_cp := dl_cp - (ws / 8) }
+                  }
+                }
+                whenIsActive {
+                  io.mem_addr.valid := True
+                  io.mem_addr.payload := dl_cp
+                  io.write_port.valid := True
+                  io.mem_is_write := True
+                  io.write_port.payload := srcval
+                  when(io.write_port.ready) {
+                    goto(finish)
+                  }
+                }
+              }
+
+              val dst_reg = new State {
+                whenIsActive {
+                  switch(dmode) {
+                    is(0) { dl_cp := srcval }
+                    is(1) { dl_cp := srcval + (ws / 8) }
+                    is(2) { dl_cp := srcval - (ws / 8) }
+                    is(3) { dl_cp := srcval - (ws / 8) }
+                  }
+                  goto(finish)
+
+                }
+              }
+              val finish: State = new State {
+                onEntry {
+                  dl_v := dl_cp; sp_v := sp_cp; dl_sp_writeback := True
+                }
+                // TODO: can this cycle be skipped?
+                // i think the nested exits might cause enough
+                // time to pass such that we don't need to pause here.
+                whenIsActive { when(!dl_sp_writeback) { exit() } }
+              }
             }
-          }.otherwise {
-            switch(dmode) {
-              is(0) { regs(dl) := scont }
-              is(1) { regs(dl) := scont + (ws / 8) }
-              is(2) { regs(dl) := scont - (ws / 8) }
-              is(3) { regs(dl) := scont - (ws / 8) }
+            xf_ctrl.setEncoding((binaryOneHot))
+            xf_ctrl
+
+          }) {
+            whenCompleted {
+              exit()
             }
-            dready := True
+          }
+
+          val do_sr: State = new State {
+            val dst = inst(11 downto 8)
+            val wr_sr = inst(12)
+
+            onEntry { sr_addr := dst; sr_access := True }
+            whenIsActive {
+              when(!sr_access) {
+                switch(inst(7 downto 0)) {
+                  is(0) {
+                    // TODO: register a number
+                    sr_out := U(0, ws bits)
+                  }
+                  is(1) {
+                    sr_out := U(ws, ws bits)
+                  }
+                  is(2) {
+                    when(wr_sr) {
+                      ivt := old_dst_val
+                    } otherwise {
+                      sr_out := ivt
+                    }
+                  }
+                  is(3) {
+                    when(wr_sr) {
+                      halt := old_dst_val =/= 0
+                    }
+                  }
+                  is(4) {
+                    when(wr_sr) {
+                      inst_ret := old_dst_val
+                    }.otherwise { sr_out := inst_ret }
+                  }
+                  is(5) {
+                    when(wr_sr) {
+                      cycl_ct := old_dst_val
+                    }.otherwise { sr_out := cycl_ct }
+                  }
+                  is(6) {
+                    when(!wr_sr) {
+                      sr_out := U(234, ws bits)
+                      // FIXME? 240MHz / 1024Hz = 234.375, 0.1% error
+                    }
+                  }
+                }
+                exit()
+              }
+            }
+          }
+
+          val others: State = new State {
+            val cond_src = inst(11 downto 8)
+            onEntry {
+              cond_access := True; cond_addr := cond_src; did_other := True
+            }
+            whenIsActive {
+              switch(inst(15 downto 12)) {
+                is(1) {
+                  logic.io.q := dl_v
+                  logic.io.p := sp_v
+                  logic.io.op := inst(11 downto 8)
+                  other_res := logic.io.res
+                  exit()
+                  printf(s"logic op=${inst(11 downto 8)}\n")
+                }
+                is(2) {
+                  arith.io.d := dl_v
+                  arith.io.s := Mux(inst(11), sp, sp_v)
+                  arith.io.op.assignFromBits(inst(10 downto 8).asBits)
+                  arith.io.go := True
+                  when(arith.io.ready) {
+                    other_res := arith.io.res
+                    exit()
+                  }
+                }
+                is(3) {
+                  compare.io.d := dl_v
+                  compare.io.s := sp_v
+                  compare.io.eq := inst(8)
+                  compare.io.gt := inst(9)
+                  compare.io.sn := inst(10)
+                  compare.io.iv := inst(11)
+                  other_res := compare.io.res.asUInt(ws bits)
+                  exit()
+                }
+                is(8) {
+                  // conditional
+                  val offset = inst(7 downto 0)
+                  when(!cond_access) {
+                    when(cond =/= 0) {
+                      pc := (pc.asSInt + offset.resize(ws bits).asSInt).asUInt
+                    }
+                    other_res := dl_v
+                  }
+                  exit()
+                }
+                is(9) {
+                  // JAL
+                  other_res := pc
+                  pc := sp_v
+                  exit()
+                }
+                is(12) {
+                  other_res := inst(11 downto 4).resized
+                  exit()
+                }
+              }
+            }
+          }
+
+          val arith_res = new State {
+            whenIsActive {
+              other_res := arith.io.res
+              exit()
+            }
           }
         }
 
-        when(dready) {
-          io.write_port.valid := False
-          io.mem_addr.valid := False
-          io.mem_is_write := False
-          pc_stowed := False
+        exec_ctrl.setEncoding(binaryOneHot)
+        exec_ctrl
+      }) {
+        whenIsActive { dbg.cur_stage := s_execute }
+
+        whenCompleted {
+          when(did_other) {
+            other_writeback := True
+            did_other := False
+          }
+          goto(instret)
+        }
+      }
+
+      val instret: State = new State {
+        onEntry { pc_writeback := True }
+        whenIsActive {
+          dbg.cur_stage := s_writeback
           inst_ret := inst_ret + 1
-          when(halt) {
-            state := s_idle
-          }.otherwise {
-            state := s_fetch
+          when(!pc_writeback) {
+            when(halt) {
+              goto(idle)
+            }.otherwise {
+              goto(fetch)
+            }
           }
         }
       }
-    }.otherwise {
-      when(inst(15 downto 13) === 5) {
-        val is_wr = inst(12)
-        val dst = inst(11 downto 8)
-        val oughta_halt = False
-        switch(inst(7 downto 0)) {
-          is(0) {
-            when(!is_wr) {
-              regs(dst) := U(0, ws bits)
-            }
-          }
-          is(1) {
-            when(!is_wr) {
-              regs(dst) := U(ws, ws bits)
-            }
-          }
-          is(2) {
-            when(!is_wr) {
-              regs(dst) := U(0, ws bits) // TODO: define and implement
-            }
-          }
-          is(3) {
-            when(is_wr) {
-              halt := regs(dst) =/= 0
-              oughta_halt := True
-            }
-          }
-          is(4) {
-            when(is_wr) {
-              inst_ret := regs(dst)
-            }.otherwise {
-              regs(dst) := inst_ret
-            }
-          }
-          is(5) {
-            when(is_wr) {
-              cycl_ct := regs(dst)
-            }.otherwise {
-              regs(dst) := cycl_ct
-            }
-          }
-          is(6) {
-            when(!is_wr) {
-              regs(dst) := U(15, ws bits) // FIXME
-            }
-          }
-        }
-
-        inst_ret := inst_ret + 1
-        when(halt || oughta_halt) {
-          state := s_idle
-        }.otherwise {
-          state := s_fetch
-        }
-      }.otherwise {
-        switch(inst(15 downto 12)) {
-          is(1) {
-            logic.io.q := regs.read(dl)
-            logic.io.p := regs.read(sp)
-            logic.io.op := inst(11 downto 8)
-            result := logic.io.res
-            printf(s"logic op=${inst(11 downto 8)}\n")
-          }
-          is(2) {
-            arith.io.d := regs.read(dl)
-            arith.io.s := Mux(inst(11), sp, regs.read(sp))
-            arith.io.op.assignFromBits(inst(10 downto 8).asBits)
-            result := arith.io.res
-          }
-          is(3) {
-            compare.io.d := regs.read(dl)
-            compare.io.s := regs.read(sp)
-            compare.io.eq := inst(8)
-            compare.io.gt := inst(9)
-            compare.io.sn := inst(10)
-            compare.io.iv := inst(11)
-            result := compare.io.res.asUInt(ws bits)
-          }
-          is(8) {
-            // conditional
-            val offset = inst(7 downto 0)
-            val cmp = inst(11 downto 8)
-            when(regs(cmp) =/= 0) {
-              pc := (pc.asSInt + offset.resize(ws bits).asSInt).asUInt
-            }
-            result := regs.read(dl) // ew
-          }
-          is(9) {
-            result := pc
-            pc := regs.read(sp)
-          }
-          is(12) {
-            result := inst(11 downto 4).resized
-          }
-        }
-        state := s_writeback
-      }
-
     }
-  }
-
-  regs.allowOverride
-  when(state === s_writeback) {
-    printf(
-      s"writing back $inst, dl = $dl, jump to $pc, units logic=${logic.io.res}, arith=${arith.io.res}, compare=${compare.io.res}\n"
-    )
-    regs.write(dl, result)
-    when(dl =/= pc_reg) {
-      regs.write(pc_reg, pc)
-    }
-    inst_ret := inst_ret + 1
-    when(halt) {
-      state := s_idle
-    }.otherwise {
-      state := s_fetch
-    }
-  }
-}
-
-object Icestick {
-  def main(args: Array[String]) {
-    SpinalVerilog(new CPU(4, false))
-  }
-}
-//Generate the MyTopLevel's VHDL
-object MyTopLevelVhdl {
-  def main(args: Array[String]) {
-    SpinalVhdl(new CPU(16, true))
-  }
-}
-
-//Define a custom SpinalHDL configuration with synchronous reset instead of the default asynchronous one. This configuration can be resued everywhere
-object MySpinalConfig
-    extends SpinalConfig(
-      defaultConfigForClockDomains = ClockDomainConfig(resetKind = SYNC)
-    )
-
-//Generate the MyTopLevel's Verilog using the above custom configuration.
-object MyTopLevelVerilogWithCustomConfig {
-  def main(args: Array[String]) {
-    MySpinalConfig.generateVerilog(new CPU(4, false))
   }
 }
