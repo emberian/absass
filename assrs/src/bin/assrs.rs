@@ -1,5 +1,5 @@
-use std::io::prelude::*;
 use assrs::*;
+use std::io::prelude::*;
 
 pub fn main() {
     match std::env::args().nth(1).as_deref() {

@@ -1,10 +1,10 @@
 #![feature(mixed_integer_ops)]
 
-mod sim;
 mod isa;
+mod sim;
 
-pub use sim::*;
 pub use isa::*;
+pub use sim::*;
 
 #[cfg_attr(test, test)]
 pub fn runtest() {

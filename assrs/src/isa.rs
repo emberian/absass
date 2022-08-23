@@ -1,12 +1,16 @@
-
 pub const STEPPING: usize = 0;
 
-#[derive(Debug, Hash, Clone, Copy)]
+#[derive(Debug, Hash, Clone, Copy, enum_utils::IterVariants)]
 pub enum MoveMode {
     Direct,
     Incr,
     Decr,
     DecrPost,
+}
+impl MoveMode {
+    pub fn all() -> impl Iterator<Item = MoveMode> {
+        MoveMode::iter()
+    }
 }
 impl MoveMode {
     pub fn from_u8(val: u8) -> MoveMode {
