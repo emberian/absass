@@ -15,7 +15,9 @@ fn main() {
 
     if let Ok(mut device) = device {
         device.usb_reset().unwrap();
-        device.configure(ftdi::Bits::Eight, ftdi::StopBits::One, ftdi::Parity::None).unwrap();
+        device
+            .configure(ftdi::Bits::Eight, ftdi::StopBits::One, ftdi::Parity::None)
+            .unwrap();
         device.set_baud_rate(9600).unwrap();
         device.usb_purge_buffers().unwrap();
         device.set_latency_timer(5).unwrap();
@@ -57,13 +59,19 @@ fn main() {
 
         if shitty || failed_ping || fucked_up.len() != 0 || random_failed {
             eprintln!("wow!!! the ass sucks ass!! i just want it fart");
-            eprintln!("{:?}{:?}{:?}{:?}",shitty,failed_ping,fucked_up,random_failed);
+            eprintln!(
+                "{:?}{:?}{:?}{:?}",
+                shitty, failed_ping, fucked_up, random_failed
+            );
         } else {
             eprintln!("want a whiff?");
             let mut fart = reply.into_iter();
             for _ in 0..24 {
                 for _ in 0..80 {
-                    eprint!("{}", char::from_u32(0x2580+((fart.next().unwrap() as u32)%32)).unwrap())
+                    eprint!(
+                        "{}",
+                        char::from_u32(0x2580 + ((fart.next().unwrap() as u32) % 32)).unwrap()
+                    )
                 }
                 eprint!("\n")
             }
