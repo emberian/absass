@@ -593,7 +593,7 @@ def cpu_test(w, _ignored=0):
     cpu_unit = traceSignals(cpu(addr, data_to_cpu, data_to_ram, mode, ready, valid, clk, halt, reset, debug_ready, debug_out, 2))
     try_convert(cpu_unit)
     mem = cpu_ram(
-            open('../assembler/hello16.bin', 'rb').read(),
+            open(os.environ.get("ASS_BIN", '../assembler/hello16.bin'), 'rb').read(),
             addr, data_to_ram, data_to_cpu, mode, ready, valid,
             min((8, w))
     )
@@ -603,8 +603,10 @@ def cpu_test(w, _ignored=0):
         # Allow a reset to occur
         yield delay(1)
         reset.next = False
+        debugging = bool(os.environ.get('ASS_DEBUG'))
         while cpu_unit.symdict['state'] != CPU_STAGE.HALT:
-            #print(f'{now()}:\t{"tick" if clk else "tock"}\t@{addr}/O={data_to_ram}/I={data_to_cpu}:{"W" if mode else "R"},{"V" if valid else " "}{"R" if ready else " "}\tnpc={cpu_unit.sigdict["npc"]}\tstate={cpu_unit.sigdict["state"]}\tinst={cpu_unit.sigdict["inst"]}/{cpu_unit.sigdict["bits_valid"]}\txf={cpu_unit.sigdict["xf"]},{cpu_unit.sigdict["xf_state"]}\n\tregs={" ".join(hex(i.val)[2:].rjust(4, "0") for i in cpu_unit.symdict["regs"])}')
+            if debugging:
+                print(f'{now()}:\t{"tick" if clk else "tock"}\t@{addr}/O={data_to_ram}/I={data_to_cpu}:{"W" if mode else "R"},{"V" if valid else " "}{"R" if ready else " "}\tnpc={cpu_unit.sigdict["npc"]}\tstate={cpu_unit.sigdict["state"]}\tinst={cpu_unit.sigdict["inst"]}/{cpu_unit.sigdict["bits_valid"]}\txf={cpu_unit.sigdict["xf"]},{cpu_unit.sigdict["xf_state"]}\n\tregs={" ".join(hex(i.val)[2:].rjust(4, "0") for i in cpu_unit.symdict["regs"])}')
             clk.next = not clk
             yield delay(1)
             if debug_ready:
