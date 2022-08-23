@@ -1,3 +1,6 @@
+\def\isundefined#1{TT\fi\ifx#1\undefined}
+\if\isundefined\Top
+\def\Top{}
 \font\titlefont=cmb12 at 24pt
 \font\chapterfont=cmb12 at 20pt
 \font\chapterit=cmti12 at 20pt
@@ -52,3 +55,4 @@
 % Blocks
 \def\startblock{\bigskip\begingroup\leftskip=4em\rightskip=4em\parindent=0pt\tt\obeylines}
 \def\endblock{\endgroup\bigskip}
+\fi

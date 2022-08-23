@@ -1,6 +1,6 @@
 PDFTEX ?= pdftex
 
-all: calling-convention.pdf isa-insn.pdf crap-1.pdf
+all: ass.pdf calling-convention.pdf isa-insn.pdf crap-1.pdf
 .PHONY: all
 
 %.pdf: %.tex
