@@ -88,13 +88,30 @@ class Nexass extends Component {
   val cpu = new ResetArea(reset_cpu.io.pressed || fart.fart.io.rst_cpu, false) {
     val ass = new CPU(ws, false)
 
-    val plat = new TrivialPlat(ws, 1024)
+    val mem = new TrivialPlat(ws, 1024)
 
-    ass.io <> plat.cpu
+    val regs = new RegAccess(ws)
+    ass.io.io <> mem.io
+    ass.io.regs <> regs.io
+    when(fart.fart.io.ass.halt) {
+      fart.fart.io.regs <> regs.io
+    } otherwise {
+      fart.fart.io.regs.sp_v.assignDontCare()
+      fart.fart.io.regs.dl_v.assignDontCare()
+
+      fart.fart.io.regs.sr_v.assignDontCare()
+
+      fart.fart.io.regs.cond.assignDontCare()
+
+      fart.fart.io.regs.busy := True
+
+      fart.fart.io.regs.reg_r.assignDontCare()
+
+    }
+
   }
 
   fart.fart.io.ass <> cpu.ass.dbg
-
   io.link.txd := RegNext(!fart.fart.io.txd) addTag (crossClockDomain)
   // INVERSION: we're feeding into an NPN BJT which inverts the voltage
   // as it shifts 1.8V to 5V for the Arduino to sense.

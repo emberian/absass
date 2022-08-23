@@ -9,9 +9,10 @@ import spinal.core.sim._
 import scala.util.Random
 
 /** Memory-only platform. */
-class TrivialPlat(val ws: Int, val memsz: Int) extends Module {
-  val cpu = slave(CPUIO(ws))
+class TrivialPlat(val ws: Int, val memsz: Int) extends Component {
+  val io = slave(CPUIO(ws))
 
+  val cpu = io
   val mem = Mem(UInt(ws bits), memsz)
   mem.setTechnology(ramBlock)
 
@@ -70,8 +71,8 @@ class TrivialPlat(val ws: Int, val memsz: Int) extends Module {
         }
       }
     }
-
   }
+  bus_switch.setEncoding(binaryOneHot)
 
   mem.readSyncMixedWidth(
     insn_addr.resize(if (16 == ws) addrbits else addrbits + 1),

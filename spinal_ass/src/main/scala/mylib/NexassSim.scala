@@ -8,6 +8,20 @@ import spinal.sim._
 import spinal.core.sim._
 import scala.util.Random
 
+object Alt {
+  def apply(a: () => Unit, b: () => Unit) = {
+    val _delay = RegInit(False)
+    when(!_delay) {
+      a()
+      _delay := True
+    }
+    when(_delay) {
+      b()
+      _delay := False
+    }
+  }
+}
+
 object DebounceSim {
   def main(args: Array[String]) {
     SimConfig.withWave
@@ -120,6 +134,57 @@ object FartSim {
   }
 }
 
+object MemTest {
+  def main(args: Array[String]) {
+    SimConfig.withWave
+      .withConfig(
+        SpinalConfig(defaultClockDomainFrequency = FixedFrequency(1 Hz))
+      )
+      .doSim(new Component {
+        val m =
+          Mem(Bool, List(False, False, True, False, True, False, True, False))
+        val v = Reg(Bool)
+        val ctr = Reg(UInt(2 bits)) init (3)
+        val addr = UInt(3 bits)
+        val wrval = False
+        val memen = Bool
+        val wren = Bool
+        ctr := ctr + 1
+        switch(ctr) {
+          is(0) {
+            addr := 0
+            wrval := True
+            memen := True
+            wren := True
+          }
+          is(1) {
+            addr := 3
+            wren := False
+            memen := True
+          }
+          is(2) {
+            addr := 0
+            wrval := False
+            memen := True
+            wren := True
+          }
+          is(3) {
+            addr := 6
+            wren := True
+            memen := True
+            wrval := True
+          }
+        }
+        val w = m.readWriteSync(addr, wrval, memen, wren)
+        v := w
+      }) { dut =>
+        dut.clockDomain.forkStimulus(2)
+        dut.clockDomain.waitRisingEdge()
+        sleep(30)
+      }
+  }
+
+}
 object NexassSim {
   def main(args: Array[String]) {
     SimConfig.withWave
@@ -130,7 +195,7 @@ object NexassSim {
       )
       .doSim(new Nexass) { nexass =>
         nexass.clockDomain.forkStimulus(2)
-        
+
       }
   }
 }

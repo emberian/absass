@@ -24,6 +24,7 @@ class Fart(ws: Int) extends Component {
     val rst_cpu = out Bool ()
 
     val ass = slave(DebugPort(ws))
+    val regs = slave(RegBus(ws))
   }
 
   io.rst_cpu := False
@@ -39,10 +40,18 @@ class Fart(ws: Int) extends Component {
 
   io.ass.sstep_insn := False
   io.ass.sstep := False
-  io.ass.reg_addr.assignDontCare()
-  io.ass.reg_w.assignDontCare()
-  io.ass.wren.assignDontCare()
-  io.ass.rgen.assignDontCare()
+
+  io.regs.sp.assignDontCare()
+  io.regs.dl.assignDontCare()
+  io.regs.reg_addr.assignDontCare()
+  io.regs.sr_addr.assignDontCare()
+  io.regs.sr_out.assignDontCare()
+  io.regs.sp_out.assignDontCare()
+  io.regs.dl_out.assignDontCare()
+  io.regs.other.assignDontCare()
+  io.regs.op.assignDontCare()
+  io.regs.go.assignDontCare()
+  io.regs.pc.assignDontCare()
 
   val uart = new Uart
   dbg.txClk := uart.dbg.txClk
@@ -68,6 +77,7 @@ class Fart(ws: Int) extends Component {
         dbg.synced := False
         rd_ready := True
         compare_failed := False
+        io.ass.halt := True
         when(uart.io.rd.valid) {
           handshake_fifo.io.push.valid := True
           bytes_seen := 1
@@ -210,10 +220,11 @@ class Fart(ws: Int) extends Component {
       val m = new StateMachine {
 
         val find_cmd: State = new State with EntryPoint {
-          onEntry { rd_ready := True }
+          onEntry { io.ass.halt := halting; rd_ready := True }
           whenIsActive {
             word_bytes := BPW - 1
             word_bytes_2 := BPW - 1
+            word_reading.asBits.clearAll()
 
             when(uart.io.rd.valid) {
               io.ass.halt := True
@@ -261,7 +272,7 @@ class Fart(ws: Int) extends Component {
         val reg_to_op = Reg(UInt(4 bits))
 
         val word_to_write = Reg(UInt(ws bits))
-        val word_reading = Reg(UInt(ws bits))
+        val word_reading = Reg(Vec(UInt(8 bits), ws / 8))
 
         val read_reg: State = new StateFsm(new StateMachine {
           val read_reg_num: State = new State with EntryPoint {
@@ -276,17 +287,17 @@ class Fart(ws: Int) extends Component {
           }
 
           val read_reg: State = new State {
+            onEntry { io.regs.reg_addr := reg_to_op }
             whenIsActive {
-              io.ass.rgen := True
-              io.ass.reg_addr := reg_to_op
-              io.ass.wren := False
-              exit()
+              when(!io.regs.busy) {
+                word_to_write := io.regs.reg_r
+                exit()
+              }
             }
           }
         }) {
           whenCompleted {
-            word_to_write := io.ass.reg_r
-            rd_ready := False
+            rd_ready := False // dead?
             goto(write_one_word)
           }
         }
@@ -318,13 +329,11 @@ class Fart(ws: Int) extends Component {
 
         val word_bytes_2 = Reg(UInt(log2Up(BPW) bits)) init (0)
         val write_reg_read_one_word: State = new State {
-          onEntry { word_reading := 0; rd_ready := True }
+          onEntry { rd_ready := True }
           whenIsActive {
             when(uart.io.rd.valid) {
               word_bytes_2 := (word_bytes_2 - 1).resized
-              word_reading := (word_reading << 8).resize(
-                ws
-              ) | uart.io.rd.payload.resized
+              word_reading(word_bytes_2) := uart.io.rd.payload
               when(word_bytes_2 === 0) {
                 rd_ready := False
                 goto(write_reg_finish)
@@ -335,19 +344,20 @@ class Fart(ws: Int) extends Component {
 
         val write_reg_finish: State = new State {
           whenIsActive {
-            io.ass.reg_addr := reg_to_op
-            io.ass.rgen := True
-            io.ass.wren := True
-            io.ass.reg_w := word_reading
-
-            goto(find_cmd)
+            io.regs.sr_addr := reg_to_op
+            io.regs.sr_out := word_reading.asBits.asUInt
+            io.regs.op := RegOps.sr_writeback
+            io.regs.go := True
+            when(!io.regs.busy) {
+              goto(find_cmd)
+            }
           }
         }
 
         val insn_to_exec = Reg(UInt(16 bits))
         val read_one = RegInit(False)
         val read_insn: State = new State {
-          onEntry { read_one := False; io.ass.halt := True }
+          onEntry { io.ass.halt := True }
           whenIsActive {
             rd_ready := True
             when(uart.io.rd.valid) {
@@ -356,6 +366,7 @@ class Fart(ws: Int) extends Component {
                 read_one := True
               } otherwise {
                 rd_ready := False
+                read_one := False
                 insn_to_exec(15 downto 8) := uart.io.rd.payload
                 goto(exec_insn)
               }
@@ -392,7 +403,7 @@ class Fart(ws: Int) extends Component {
         }
       }; m.setEncoding(binaryOneHot); m
     }) {
-      whenCompleted { io.ass.halt := halting; goto(scream) }
+      whenCompleted { goto(scream) }
     }
   }
   m.setEncoding(binaryOneHot)

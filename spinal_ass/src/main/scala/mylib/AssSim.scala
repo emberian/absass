@@ -231,36 +231,41 @@ object ComparisonSim {
   }
 }
 
+class CPUWrap(ws: Int, fancy: Boolean) extends Component {
+  val cpu = new CPU(ws, fancy)
+  val regs = new RegAccess(ws)
+  regs.io <> cpu.regs
+}
 object CPUSim {
   def main(args: Array[String]) {
-    SimConfig.withWave.doSim(new CPU(8, true)) { cpu =>
-      cpu.clockDomain.forkStimulus(period = 2)
-
+    SimConfig.withWave.doSim(new CPUWrap(8, true)) { wrap =>
+      wrap.clockDomain.forkStimulus(period = 2)
+      val cpu = wrap.cpu
       def exec_insn(c: CPU, i: Int, exp_pc: Int) = {
         c.dbg.sstep #= true
-        waitUntil(c.io.insn_content.ready.toBoolean == true)
-        assert(c.io.insn_addr.payload.toBigInt == exp_pc)
-        c.io.insn_content.payload #= i
+        waitUntil(c.io.io.insn_content.ready.toBoolean == true)
+        assert(c.io.io.insn_addr.payload.toBigInt == exp_pc)
+        c.io.io.insn_content.payload #= i
         sleep(1)
-        c.io.insn_content.valid #= true
+        c.io.io.insn_content.valid #= true
         waitUntil(c.dbg.cur_stage.toBigInt == 1)
         c.dbg.sstep #= false
         sleep(2)
-        c.io.insn_content.valid #= false
+        c.io.io.insn_content.valid #= false
         waitUntil(c.dbg.cur_stage.toBigInt == 0)
         c.clockDomain.waitRisingEdge()
       }
       def pc(c: CPU): BigInt = {
         // assert(c.io.insn_addr.valid == 1)
-        c.io.insn_addr.payload.toBigInt
+        c.io.io.insn_addr.payload.toBigInt
       }
 
       cpu.dbg.halt #= true
-      cpu.io.insn_content.valid #= false
-      cpu.io.insn_content.payload #= 0
-      cpu.io.read_port.valid #= false
-      cpu.io.read_port.payload #= 0
-      cpu.io.write_port.ready #= false
+      cpu.io.io.insn_content.valid #= false
+      cpu.io.io.insn_content.payload #= 0
+      cpu.io.io.read_port.valid #= false
+      cpu.io.io.read_port.payload #= 0
+      cpu.io.io.write_port.ready #= false
       cpu.dbg.sstep_insn #= false
       cpu.dbg.sstep #= false
 
@@ -268,13 +273,13 @@ object CPUSim {
 
       exec_insn(cpu, 0x1f11, 0)
 
-      assert(cpu.regs(1).toBigInt == 0xff)
-      cpu.regs(2) #= 0xff
+      assert(wrap.regs.regs(1).toBigInt == 0xff)
+      wrap.regs.regs(2) #= 0xff
       exec_insn(cpu, 0x1a23, 2)
-      assert(cpu.regs(3).toBigInt == 0xff)
+      assert(wrap.regs.regs(3).toBigInt == 0xff)
 
       exec_insn(cpu, 0xcafe, 4)
-      assert(cpu.regs(0xe).toBigInt == 0xaf)
+      assert(wrap.regs.regs(0xe).toBigInt == 0xaf)
     }
   }
 }
