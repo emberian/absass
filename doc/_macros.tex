@@ -1,5 +1,4 @@
-\ifx\Top\undefined
-\def\Top{}
+\ifx\assmacros\relax\endinput\else\let\assmacros=\relax\fi
 \font\titlefont=cmb12 at 24pt
 \font\chapterfont=cmb12 at 20pt
 \font\chapterit=cmti12 at 20pt
@@ -11,7 +10,14 @@
 \newcount\subsecno \subsecno=0
 
 %\def\title#1{\line{#1\hss}\hrule\bigskip}
-\def\title#1{\headline={\vbox{\line{#1\hss}\vskip2pt\hrule}}}
+\expandafter\ifx\csname everytitle\endcsname\relax\def\everytitle#1{}\fi
+\def\title#1{%
+\chapno=0\secno=0\subsecno=0%
+% Order is important: do \everytitle first, in case it \ejects, because we
+% would want to hold over \headline in that case.
+\everytitle{#1}%
+\headline={\vbox{\line{#1\hss}\vskip2pt\hrule}}%
+}
 
 \newwrite\toc
 \immediate\openout\toc=toc.tex
@@ -20,7 +26,7 @@
 	\global\advance\chapno by1
 	\global\secno=0
 	\global\subsecno=0
-	\filbreak\medskip
+	\vfil\penalty-50\vfilneg\medskip
 	{\chapterfont Chapter \the\chapno. #1}\bigskip
 	\xdef\dowrite{\write\toc{\string\tocchap{\the\chapno}{#1}{\noexpand\the\noexpand\count0}}}\dowrite
 }
@@ -28,7 +34,7 @@
 \def\section#1{
 	\global\advance\secno by1
 	\global\subsecno=0
-	\filbreak\medskip
+	\vfil\penalty-50\vfilneg\medskip  % A "smaller" \filbreak
 	{\secfont Section \the\secno. #1}\medskip
 	\xdef\dowrite{\write\toc{\string\tocsec{\the\secno}{#1}{\noexpand\the\noexpand\count0}}}\dowrite
 }
@@ -54,7 +60,6 @@
 % Blocks
 \def\startblock{\bigskip\begingroup\leftskip=4em\rightskip=4em\parindent=0pt\tt\obeylines}
 \def\endblock{\endgroup\bigskip}
-\fi
-\ifx\maybye\undefined
-\def\maybye{\end}
-\fi
+
+% Conditional termination
+\expandafter\ifx\csname maybye\endcsname\relax\let\maybye=\end\fi
