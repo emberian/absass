@@ -20,7 +20,7 @@ pub fn main() {
             let mut i = std::io::stdin().lock();
             while let Ok(2) = i.read(&mut insn_buf) {
                 println!(
-                    "{:?}",
+                    "{}",
                     Insn::decode((insn_buf[0] as u16) << 8 | insn_buf[1] as u16)
                 );
             }
@@ -33,6 +33,35 @@ pub fn main() {
                 let iv = Insn::decode(u16::from_str_radix(l, 16).unwrap());
                 println!("{:?}", iv);
             }
+        }
+
+        Some("wtfxf") => {
+            let mut m = Machine::default();
+            m.regs[1] = 3;
+            let i = Insn::Move {
+                src: 1,
+                dst: 1,
+                s_mode: MoveMode::Incr,
+                s_deref: false,
+                d_mode: MoveMode::Incr,
+                d_deref: false,
+            };
+            m.exec(i);
+            println!("after {}\t\t R1 = {}", i.to_asm(), m.regs[1]);
+            m.regs[1] = 3;
+
+            let i = Insn::Move {
+                src: 1,
+                dst: 1,
+                s_mode: MoveMode::Direct,
+                s_deref: false,
+                d_mode: MoveMode::Incr,
+                d_deref: false,
+            };
+
+            m.exec(i);
+            println!("after {}\t\t R1 = {}", i.to_asm(), m.regs[1]);
+
         }
 
         Some("gen_opcode") => match std::env::args().nth(2).as_deref() {

@@ -33,7 +33,7 @@ impl Machine {
     pub fn exec(&mut self, i: Insn) -> StepOut {
         use StepOut::*;
         #[cfg(debug_assertions)]
-        println!("exec {:?}", i);
+        println!("exec {}", i);
 
         let mut pc = self.pc() + 2;
         match i {

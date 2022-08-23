@@ -4,8 +4,8 @@ pub const STEPPING: usize = 0;
 pub enum MoveMode {
     Direct,
     Incr,
-    Decr,
     DecrPost,
+    Decr,
 }
 impl MoveMode {
     pub fn all() -> impl Iterator<Item = MoveMode> {
@@ -123,6 +123,11 @@ pub enum Insn {
     },
 }
 
+impl std::fmt::Display for Insn {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.to_asm())
+    }
+}
 impl Insn {
     pub fn encode(&self) -> u16 {
         match self {
@@ -309,22 +314,22 @@ impl Insn {
             }),
             Insn::Arith { op, .. } => Some(op.brief()),
             Insn::Compare { eq, gt, sn, iv, .. } => Some(match (eq, gt, sn, iv) {
-                (false, false, false, false) => ".F1",
-                (true, false, false, false) => ".E1",
-                (false, true, false, false) => ".AB",
-                (true, true, false, false) => ".AE",
-                (false, false, true, false) => ".F2",
-                (true, false, true, false) => ".E2",
-                (false, true, true, false) => ".GT",
-                (true, true, true, false) => ".GE",
-                (false, false, false, true) => ".T1",
-                (true, false, false, true) => ".N1",
-                (false, true, false, true) => ".BE",
-                (true, true, false, true) => ".BL",
-                (false, false, true, true) => ".T2",
-                (true, false, true, true) => ".N2",
-                (false, true, true, true) => ".LT",
-                (true, true, true, true) => ".LE",
+                (false, false, false, false) => "CMP.F1",
+                (true, false, false, false) => "CMP.E1",
+                (false, true, false, false) => "CMP.AB",
+                (true, true, false, false) => "CMP.AE",
+                (false, false, true, false) => "CMP.F2",
+                (true, false, true, false) => "CMP.E2",
+                (false, true, true, false) => "CMP.GT",
+                (true, true, true, false) => "CMP.GE",
+                (false, false, false, true) => "CMP.T1",
+                (true, false, false, true) => "CMP.N1",
+                (false, true, false, true) => "CMP.BE",
+                (true, true, false, true) => "CMP.BL",
+                (false, false, true, true) => "CMP.T2",
+                (true, false, true, true) => "CMP.N2",
+                (false, true, true, true) => "CMP.LT",
+                (true, true, true, true) => "CMP.LE",
             }),
             Insn::Move { .. } => Some("XF"),
             Insn::JumpLink { .. } => Some("JL"),
@@ -333,6 +338,63 @@ impl Insn {
             Insn::SysReg { .. } => Some("SR"),
             Insn::SmallImm { .. } => Some("SI"),
             Insn::NotSure { .. } => None,
+        }
+    }
+
+    pub fn to_asm(&self) -> String {
+        match *self {
+            Insn::Logic { src, dst, .. } => format!("{} R{}, R{}", self.brief().unwrap(), dst, src),
+            Insn::Arith { op, src, dst, si } => {
+                if !si {
+                    format!("{} R{}, R{}", op.brief(), dst, src)
+                } else {
+                    format!("{} R{}, {}", op.brief(), dst, src)
+                }
+            }
+            Insn::Compare { src, dst, .. } => {
+                format!("{} R{}, R{}", self.brief().unwrap(), dst, src)
+            }
+            Insn::Move {
+                src,
+                dst,
+                s_mode,
+                s_deref,
+                d_mode,
+                d_deref,
+            } => {
+                fn operand(r: usize, m: MoveMode) -> String {
+                    use MoveMode::*;
+                    match m {
+                        Decr => format!("--R{}", r),
+                        Incr => format!("R{}++", r),
+                        Direct => format!("R{}", r),
+                        DecrPost => format!("R{}--", r),
+                    }
+                }
+                format!(
+                    "XF {}{}, {}{}",
+                    if d_deref { "*" } else { "" },
+                    operand(dst, d_mode),
+                    if s_deref { "*" } else { "" },
+                    operand(src, s_mode)
+                )
+            }
+            Insn::JumpLink { prog, link } => format!("JAL R{}, R{}", prog, link),
+            Insn::JumpCond { cond, offset } => format!("JC R{}, {}", cond, offset),
+            Insn::SubWord { dst, index, bytes } => {
+                format!("SWO R{}[{}..{}]", dst, index, index+bytes)
+            }
+            Insn::SysReg { write, reg, sr } => {
+                if write {
+                    format!("SR.W R{}, {}", reg, sr)
+                } else {
+                    format!("SR.R R{}, {}", reg, sr)
+                }
+            }
+            Insn::SmallImm { dst, val } => format!("SI R{}, {}", dst, val),
+            Insn::NotSure { value } => {
+                format!(".BYTE 0x{:x}\n.BYTE 0x{:x}", (value & 0xff00) >> 8, value & 0xff)
+            }
         }
     }
 
