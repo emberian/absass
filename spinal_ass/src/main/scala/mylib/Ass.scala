@@ -34,6 +34,7 @@ import Stages._
 import RegOps._
 
 class CPU(val ws: Int, val fancy: Boolean) extends Module {
+  val BPW = ws / 8
   val io = new Bundle {
     val io = master(CPUIO(ws))
     val dbg = master(DebugPort(ws))
@@ -199,27 +200,32 @@ class CPU(val ws: Int, val fancy: Boolean) extends Module {
               val smode = inst(12 downto 11)
               val dl_in = Reg(UInt(ws bits))
               val sp_in = Reg(UInt(ws bits))
+              val sp_inc = sp_cp + BPW
+              val sp_dec = sp_cp - BPW
+              val dl_inc = dl_cp + BPW
+              val dl_dec = dl_cp - BPW
+
               val start: State = new State with EntryPoint {
                 whenIsActive {
                   regs.op := pc_writeback
                   regs.go := True
                   dl_in := dl_cp
-                  switch(dmode) {
-                    is(0) { dl_cp_out := dl_cp }
-                    is(1) { dl_cp_out := dl_cp + (ws / 8) }
-                    is(2) {
-                      dl_in := dl_cp - (ws / 8); dl_cp_out := dl_cp - (ws / 8)
-                    }
-                    is(3) { dl_cp_out := dl_cp - (ws / 8) }
-                  }
                   sp_in := sp_cp
+
                   switch(smode) {
                     is(0) { sp_cp_out := sp_cp }
-                    is(1) { sp_cp_out := sp_cp + (ws / 8) }
+                    is(1) { sp_cp_out := sp_inc }
+                    is(2) { sp_in := sp_dec; sp_cp_out := sp_dec }
+                    is(3) { sp_cp_out := sp_dec }
+                  }
+
+                  switch(dmode) {
+                    is(0) { dl_cp_out := dl_cp }
+                    is(1) { dl_cp_out := dl_inc }
                     is(2) {
-                      sp_in := sp_cp - (ws / 8); sp_cp_out := sp_cp - (ws / 8)
+                      dl_in := dl_dec; dl_cp_out := dl_dec
                     }
-                    is(3) { sp_cp_out := sp_cp - (ws / 8) }
+                    is(3) { dl_cp_out := dl_dec }
                   }
 
                   when(sindir) {
@@ -236,6 +242,18 @@ class CPU(val ws: Int, val fancy: Boolean) extends Module {
 
               val src_mem: State = new State {
                 whenIsActive {
+                  when(sp === dl) {
+                    // there is a hazard that we can correct this cycle
+                    // before it can be observed. refresh the dl registers
+                    // to reflect an input of sp_in.
+                    dl_in := sp_in
+                    switch(dmode) {
+                      is(0) { dl_cp_out := sp_in }
+                      is(1) { dl_cp_out := sp_in + BPW }
+                      is(2) { dl_in := dl_dec; dl_cp_out := sp_in - BPW }
+                      is(3) { dl_cp_out := sp_in - BPW }
+                    }
+                  }
                   io.io.mem_addr.valid := True
                   io.io.mem_addr.payload := sp_in
                   io.io.read_port.ready := True
@@ -255,6 +273,18 @@ class CPU(val ws: Int, val fancy: Boolean) extends Module {
               val src_reg: State = new State {
                 whenIsActive {
                   srcval := sp_in
+                  when(sp === dl) {
+                    // there is a hazard that we can correct this cycle
+                    // before it can be observed. refresh the dl registers
+                    // to reflect an input of sp_in.
+                    dl_in := sp_in
+                    switch(dmode) {
+                      is(0) { dl_cp_out := sp_in }
+                      is(1) { dl_cp_out := sp_in + BPW }
+                      is(2) { dl_in := dl_dec; dl_cp_out := sp_in - BPW }
+                      is(3) { dl_cp_out := sp_in - BPW }
+                    }
+                  }
 
                   when(dindir) {
                     goto(dst_mem)
