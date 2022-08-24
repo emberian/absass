@@ -1,8 +1,9 @@
+use comfy_table::Table;
+
 use crate::isa::*;
 
 use std::io::Write;
 
-#[derive(Default)]
 pub struct Machine {
     pub regs: [Word; 16],
     pub memory: Vec<u8>,
@@ -13,6 +14,38 @@ pub struct Machine {
     pub sr10: Option<Word>,
 }
 
+impl Default for Machine {
+    fn default() -> Self {
+        Self {
+            regs: Default::default(),
+            memory: vec![0; 256],
+            ivt: Default::default(),
+            cycles: Default::default(),
+            insns: Default::default(),
+            bps: Default::default(),
+            sr10: Default::default(),
+        }
+    }
+}
+
+impl std::fmt::Debug for Machine {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut t = Table::new();
+        t.add_row(self.regs[0..8].iter().map(|x| format!("{:04x}", x)));
+        t.add_row(self.regs[8..].iter().map(|x| format!("{:04x}", x)));
+        t.add_row(
+            vec![
+                (self.ivt as usize, "eh"),
+                (self.cycles as usize, "cycs"),
+                (self.insns as usize, "instret"),
+                (self.sr10.unwrap_or(0) as usize, "sr10"),
+            ]
+            .iter()
+            .map(|(x, lbl)| format!("{} = {:04x}", lbl, x)),
+        );
+        write!(f, "{}", t)
+    }
+}
 #[derive(Debug, Hash, Clone, Copy)]
 pub enum StepOut {
     Continue,
@@ -91,7 +124,7 @@ impl Machine {
                     s
                 };
                 let s = if s_deref {
-                    let mut buf = [0u8; 8];
+                    let mut buf = [0u8; WORDSZ as usize];
                     buf.copy_from_slice(
                         &self.memory[s_val as usize..s_val as usize + WORDSZ as usize],
                     );

@@ -61,6 +61,20 @@ pub fn main() {
 
             m.exec(i);
             println!("after {}\t\t R1 = {}", i.to_asm(), m.regs[1]);
+            m.regs[1] = 0;
+            println!("{:?}", m);
+            let i = Insn::Move {
+                src: 1,
+                dst: 1,
+                s_mode: MoveMode::Incr,
+                s_deref: false,
+                d_mode: MoveMode::Incr,
+                d_deref: true,
+            };
+
+            m.exec(i);
+            println!("after {}\t\t R1 = {}", i.to_asm(), m.regs[1]);
+            println!("{:4x}", i.encode());
 
         }
 

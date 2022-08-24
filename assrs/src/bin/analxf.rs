@@ -1,10 +1,12 @@
 use self::Observable::*;
 use self::SymbolicValue::*;
 use assrs::*;
+use comfy_table::presets::UTF8_FULL;
+use std::fmt::Pointer;
 use std::io::prelude::*;
 use std::rc::Rc;
 // everything else about the interpreter is bone standard for an abstract domain.
-#[derive(PartialEq, Eq, PartialOrd, Ord, Clone)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Hash)]
 enum SymbolicValue {
     // start value of a register. we assume nothing about these except RegInit(x, z) == RegInit(y, w) iff x == y && z == w
     RegInit(usize, isize),
@@ -17,6 +19,25 @@ enum SymbolicValue {
     RegVal(usize, Rc<SymbolicValue>, usize),
 }
 
+impl SymbolicValue {
+    fn sym_eq(&self, other: &SymbolicValue) -> bool {
+        match (&*self, &*other) {
+            (RegInit(r0, off1), RegInit(r1, off2)) => r0 == r1 && off1 == off2,
+            (MemInit(m0), MemInit(m1)) => m0 == m1,
+            (Incr(a), Incr(b)) => a.sym_eq(&b),
+            (Decr(a), Decr(b)) => a.sym_eq(&b),
+            (MemVal(a0, a1), MemVal(b0, b1)) => a0.sym_eq(&b0) && a1.sym_eq(&b1),
+            (RegVal(r0, a, t0), RegVal(r1, b, t1)) => r0 == r1 && a.sym_eq(&b) && t0 == t1,
+            (RegInit(r0, _off), RegVal(r1, guess, _t0)) => r0 == r1 && self.sym_eq(&guess),
+            (RegVal(..), RegInit(..)) => other.sym_eq(self),
+            (MemInit(_t0), MemVal(_addr, guess)) => self.sym_eq(&guess),
+            (MemVal(..), MemInit(..)) => other.sym_eq(self),
+            (MemInit(_), _) => false,
+            (_, MemInit(_)) => false,
+            (_, _) => false,
+        }
+    }
+}
 impl std::fmt::Debug for SymbolicValue {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match &*Symmer::default().shrink(&Rc::new(self.clone())) {
@@ -48,7 +69,8 @@ enum Observable {
     LoadMem(Rc<SymbolicValue>),
 }
 
-struct FinalState { 
+#[derive(Hash, PartialEq, Eq, Clone, Debug)]
+struct FinalState {
     regs: [Rc<SymbolicValue>; 16],
     memory: Vec<(Rc<SymbolicValue>, Rc<SymbolicValue>)>,
 }
@@ -64,7 +86,7 @@ impl Symmer {
         self.observe.push(LoadMem(addr.clone()));
         for eff in self.observe.iter().rev() {
             if let SetMem(old_addr, val) = eff {
-                if self.sym_eq(old_addr, addr) {
+                if old_addr.sym_eq(&addr) {
                     return Rc::new(MemVal(addr.clone(), val.clone()));
                 }
             }
@@ -115,11 +137,7 @@ impl Symmer {
             s.clone()
         };
 
-        let s = if i.src_indir {
-            self.load(&s_val)
-        } else {
-            s
-        };
+        let s = if i.src_indir { self.load(&s_val) } else { s };
 
         match i.sp_mode {
             Incr => {
@@ -160,68 +178,6 @@ impl Symmer {
             MemVal(_, guess) => self.shrink(guess),
             RegVal(_, guess, _) => self.shrink(guess),
         }
-    }
-
-    fn sym_eq(&self, a: &Rc<SymbolicValue>, b: &Rc<SymbolicValue>) -> bool {
-        match (&*self.shrink(a), &*self.shrink(b)) {
-            (RegInit(r0, off1), RegInit(r1, off2)) => r0 == r1 && off1 == off2,
-            (MemInit(m0), MemInit(m1)) => m0 == m1,
-            (Incr(a), Incr(b)) => self.sym_eq(a, b),
-            (Decr(a), Decr(b)) => self.sym_eq(a, b),
-            (MemVal(a0, a1), MemVal(b0, b1)) => self.sym_eq(a0, b0) && self.sym_eq(a1, b1),
-            (RegVal(r0, a, t0), RegVal(r1, b, t1)) => r0 == r1 && self.sym_eq(a, b) && t0 == t1,
-            (RegInit(r0, _off), RegVal(r1, guess, _t0)) => r0 == r1 && self.sym_eq(a, guess),
-            (RegVal(..), RegInit(..)) => self.sym_eq(b, a),
-            (MemInit(_t0), MemVal(_addr, guess)) => self.sym_eq(a, guess),
-            (MemVal(..), MemInit(..)) => self.sym_eq(b, a),
-            (MemInit(_), _) => false,
-            (_, MemInit(_)) => false,
-            (_, _) => false,
-        }
-    }
-
-    fn equivalent(&self, other: &Symmer, msg: &mut Vec<u8>) -> bool {
-        let mut out = true;
-        for reg in 0..16 {
-            if !self.sym_eq(&self.regs[reg], &other.regs[reg]) {
-                writeln!(
-                    msg,
-                    "R{} differed (us = {:?}, them = {:?})",
-                    reg,
-                    self.shrink(&self.regs[reg]),
-                    self.shrink(&other.regs[reg])
-                )
-                .unwrap();
-                out = false;
-                break;
-            }
-        }
-        let mut our_mems = self.minimal_mem_writes();
-        let mut their_mems = other.minimal_mem_writes();
-        our_mems.sort_by_key(|(addr, _)| addr.clone());
-        their_mems.sort_by_key(|(addr, _)| addr.clone());
-
-        for (us, them) in our_mems.into_iter().zip(their_mems.into_iter()) {
-            if !self.sym_eq(&us.0, &them.0) || !self.sym_eq(&us.1, &them.1) {
-                writeln!(
-                    msg,
-                    "final memory state differs (us = {:?}, them = {:?})",
-                    us, them
-                )
-                .unwrap();
-                out = false;
-            }
-        }
-
-        if !out {
-            writeln!(
-                msg,
-                "our effs: {:?}\nees effs:{:?}",
-                self.observe, other.observe
-            )
-            .unwrap();
-        }
-        out
     }
 
     fn incorrect(&mut self, i: Instance) {
@@ -270,14 +226,14 @@ impl Symmer {
     }
 
     fn final_state(&self) -> FinalState {
-        let mut effective_writes = Vec::new();
+        let mut effective_writes: Vec<(Rc<_>, Rc<_>)> = Vec::new();
         for o in &self.observe {
             match o {
                 SetMem(addr, val) => {
                     let addr = self.shrink(addr);
                     if !effective_writes
                         .iter()
-                        .any(|(e_addr, _)| self.sym_eq(&addr, &e_addr))
+                        .any(|(e_addr, _)| addr.sym_eq(e_addr))
                     {
                         effective_writes.push((addr.clone(), self.shrink(val)));
                     }
@@ -285,7 +241,103 @@ impl Symmer {
                 _ => (),
             }
         }
-        effective_writes
+        FinalState {
+            regs: self.regs.clone().map(|r| self.shrink(&r)),
+            memory: effective_writes,
+        }
+    }
+}
+
+impl FinalState {
+    fn equivalent(&self, other: &FinalState, msg: &mut Vec<u8>) -> bool {
+        let mut out = true;
+
+        for reg in 0..16 {
+            if !self.regs[reg].sym_eq(&other.regs[reg]) {
+                writeln!(
+                    msg,
+                    "R{} differed (us = {:?}, them = {:?})",
+                    reg, self.regs[reg], other.regs[reg],
+                )
+                .unwrap();
+                out = false;
+                break;
+            }
+        }
+
+        let mut sm = self.memory.clone();
+        sm.sort_by_key(|(addr, _)| addr.clone());
+        let mut om = other.memory.clone();
+        om.sort_by_key(|(addr, _)| addr.clone());
+
+        for (us, them) in sm.into_iter().zip(om.into_iter()) {
+            if !us.0.sym_eq(&them.0) || !us.1.sym_eq(&them.1) {
+                writeln!(
+                    msg,
+                    "final memory state differs (us = {:?}, them = {:?})",
+                    us, them
+                )
+                .unwrap();
+                out = false;
+            }
+        }
+
+        if !out {
+            writeln!(msg, "our effs: {:?}\nees effs:{:?}", self, other).unwrap();
+        }
+        out
+    }
+}
+
+impl std::fmt::Display for FinalState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use comfy_table::*;
+
+        let mut i = 0;
+        let mut regs_tb = Table::new();
+        regs_tb
+            .set_content_arrangement(ContentArrangement::Dynamic)
+            .load_preset(UTF8_FULL)
+            .set_width(150);
+
+        let mut cur_row = Row::new();
+        for (rn, reg) in self.regs.iter().enumerate() {
+            if let RegInit(r, val) = &**reg {
+                if *r != rn || *val != 0 {
+                    cur_row.add_cell(Cell::new(format!("R{} = {:?}", rn, reg)));
+                    i += 1;
+                }
+                if i == 4 {
+                    let mut nr = Row::new();
+                    std::mem::swap(&mut nr, &mut cur_row);
+                    println!("{:?}", nr);
+                    regs_tb.add_row(nr);
+                    i = 0;
+                }
+            }
+        }
+        if cur_row.cell_count() != 0 {
+            regs_tb.add_row(cur_row);
+        }
+        let mut cur_row = Row::new();
+        i = 0;
+        for (addr, val) in &self.memory {
+            cur_row.add_cell(Cell::new(format!("Mem[{:?}] := {:?}", addr, val)));
+            i += 1;
+            if i == 4 {
+                let mut nr = Row::new();
+                std::mem::swap(&mut nr, &mut cur_row);
+                regs_tb.add_row(nr);
+                i = 0;
+            }
+        }
+        if cur_row.cell_count() != 0 {
+            regs_tb.add_row(cur_row);
+        }
+
+        regs_tb.discover_columns();
+
+        regs_tb.fmt(f)
     }
 }
 
@@ -371,15 +423,15 @@ impl InstQuantifier {
 
     fn into_iter(self) -> impl Iterator<Item = Instance> {
         itertools::iproduct!(
-            self.which_dst_indirs,
             self.which_src_indirs,
             self.which_src_modes,
+            self.which_dst_indirs,
             self.which_dst_modes,
             self.which_src_regs,
             self.which_dst_regs
         )
         .map(
-            |(dst_indir, src_indir, src_mode, dst_mode, src_reg, dst_reg)| Instance {
+            |(src_indir, src_mode, dst_indir, dst_mode, src_reg, dst_reg)| Instance {
                 dst_indir,
                 src_indir,
                 dl_mode: dst_mode,
@@ -406,8 +458,8 @@ fn correct_isnt_incorrect() -> (String, bool) {
         solutions.push((inst, tr_g.clone()));
         dissolutions.push((inst, tr_b.clone()));
 
-        let sp_diff = !tr_g.sym_eq(&tr_g.regs[inst.sp], &tr_b.regs[inst.sp]);
-        let dl_diff = !tr_g.sym_eq(&tr_g.regs[inst.dl], &tr_b.regs[inst.dl]);
+        let sp_diff = !tr_g.regs[inst.sp].sym_eq(&tr_b.regs[inst.sp]);
+        let dl_diff = !tr_g.regs[inst.dl].sym_eq(&tr_b.regs[inst.dl]);
         if sp_diff || dl_diff {
             bad += 1;
             writeln!(&mut s, "Generated an incorrect instance {:?}\nCorrect version computed:\n\tR{r} = {:?}\n\teffs = {:?}\n\nIncorrect version computed:\n\tR{r} = {:?}\n\teffs = {:?}\n===============================================================================\n", 
@@ -446,7 +498,10 @@ fn direct_dsts_ignore_src_mode_same_reg() -> (String, bool) {
                 sp_mode: smode,
                 ..inst
             });
-            if !sm_bhv.equivalent(&reference_behavior, &mut s) {
+            if !sm_bhv
+                .final_state()
+                .equivalent(&reference_behavior.final_state(), &mut s)
+            {
                 bad += 1;
                 writeln!(&mut s, "Generated an incorrect instance {1:?} which does not match {0:?}\n====================================================\n", 
                     inst,
@@ -473,6 +528,39 @@ fn same_reg(i: impl Iterator<Item = Instance>) -> impl Iterator<Item = Instance>
     i.filter(|i| i.sp == i.dl && i.sp == 7)
 }
 
+fn quotient<I: IntoIterator<Item = Instance>>(
+    insts: I,
+    mut model: impl FnMut(&mut Symmer, Instance),
+) -> (String, bool) {
+    let mut msg = vec![];
+    let mut classes = std::collections::HashMap::new();
+    for inst in insts {
+        let mut tr = Symmer::default();
+        model(&mut tr, inst);
+        let final_st = tr.final_state();
+        let class = classes.entry(final_st.clone()).or_insert(Vec::new());
+        class.push(inst);
+        assert!(final_st.equivalent(classes.get_key_value(&final_st).unwrap().0, &mut msg));
+    }
+
+    for (representative_state, instances) in &classes {
+        writeln!(
+            &mut msg,
+            "Class with representative action\n{}\nhas {} instances:",
+            representative_state,
+            instances.len()
+        )
+        .unwrap();
+        for inst in instances {
+            writeln!(&mut msg, "\t{:?}", inst).unwrap();
+        }
+    }
+
+    writeln!(&mut msg, "{} total classes", classes.len()).unwrap();
+
+    (String::from_utf8(msg).unwrap(), classes.len() != 10081)
+}
+
 fn main() {
     let verbose = std::env::args().nth(1) == Some("-v".into());
 
@@ -481,6 +569,23 @@ fn main() {
         println!("{}", report)
     };
     let (report, surprised) = direct_dsts_ignore_src_mode_same_reg();
+    if surprised || verbose {
+        println!("{}", report)
+    };
+    let (report, surprised) = quotient(InstQuantifier::all().into_iter(), Symmer::correct);
+    if surprised || verbose {
+        println!("{}", report)
+    };
+
+    let (report, surprised) =
+        quotient(same_reg(InstQuantifier::all().into_iter()), Symmer::correct);
+    if surprised || verbose {
+        println!("{}", report)
+    };
+    let (report, surprised) = quotient(
+        same_reg(InstQuantifier::all().into_iter()),
+        Symmer::incorrect,
+    );
     if surprised || verbose {
         println!("{}", report)
     };

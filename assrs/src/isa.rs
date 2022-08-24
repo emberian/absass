@@ -24,8 +24,8 @@ impl MoveMode {
     }
 }
 pub type Reg = usize; // ruuuuust
-pub type Word = u64;
-pub const WORDSZ: Word = 8;
+pub type Word = u16;
+pub const WORDSZ: Word = 2;
 
 #[derive(Debug, Hash, Clone, Copy)]
 pub enum ArithOp {
