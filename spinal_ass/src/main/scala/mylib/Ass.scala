@@ -34,12 +34,12 @@ import Stages._
 import RegOps._
 
 class CPU(val ws: Int, val fancy: Boolean) extends Module {
-  val BPW = ws / 8
+  val WB = ws / 8
   val io = new Bundle {
     val io = master(CPUIO(ws))
     val dbg = master(DebugPort(ws))
     val regs = slave(RegBus(ws))
-  }
+  } simPublic()
   val dbg = io.dbg
   val regs = io.regs
   val arith = new ArithUnit(ws, fancy)
@@ -200,10 +200,10 @@ class CPU(val ws: Int, val fancy: Boolean) extends Module {
               val smode = inst(12 downto 11)
               val dl_in = Reg(UInt(ws bits))
               val sp_in = Reg(UInt(ws bits))
-              val sp_inc = sp_cp + BPW
-              val sp_dec = sp_cp - BPW
-              val dl_inc = dl_cp + BPW
-              val dl_dec = dl_cp - BPW
+              val sp_inc = sp_cp + WB
+              val sp_dec = sp_cp - WB
+              val dl_inc = dl_cp + WB
+              val dl_dec = dl_cp - WB
 
               val start: State = new State with EntryPoint {
                 whenIsActive {
@@ -249,9 +249,9 @@ class CPU(val ws: Int, val fancy: Boolean) extends Module {
                     dl_in := sp_in
                     switch(dmode) {
                       is(0) { dl_cp_out := sp_in }
-                      is(1) { dl_cp_out := sp_in + BPW }
-                      is(2) { dl_in := dl_dec; dl_cp_out := sp_in - BPW }
-                      is(3) { dl_cp_out := sp_in - BPW }
+                      is(1) { dl_cp_out := sp_in + WB }
+                      is(2) { dl_in := dl_dec; dl_cp_out := sp_in - WB }
+                      is(3) { dl_cp_out := sp_in - WB }
                     }
                   }
                   io.io.mem_addr.valid := True
@@ -280,9 +280,9 @@ class CPU(val ws: Int, val fancy: Boolean) extends Module {
                     dl_in := sp_in
                     switch(dmode) {
                       is(0) { dl_cp_out := sp_in }
-                      is(1) { dl_cp_out := sp_in + BPW }
-                      is(2) { dl_in := dl_dec; dl_cp_out := sp_in - BPW }
-                      is(3) { dl_cp_out := sp_in - BPW }
+                      is(1) { dl_cp_out := sp_in + WB }
+                      is(2) { dl_in := dl_dec; dl_cp_out := sp_in - WB }
+                      is(3) { dl_cp_out := sp_in - WB }
                     }
                   }
 

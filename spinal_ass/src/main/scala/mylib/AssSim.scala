@@ -5,6 +5,8 @@ import spinal.sim._
 import spinal.core.sim._
 
 import scala.util.Random
+import spinal.lib.slave
+import spinal.lib.master
 
 object LogicSim {
   def main(args: Array[String]) {
@@ -232,13 +234,18 @@ object ComparisonSim {
 }
 
 class CPUWrap(ws: Int, fancy: Boolean) extends Component {
+  val io = new Bundle { val dbg = master(DebugPort(ws)) }
   val cpu = new CPU(ws, fancy)
   val regs = new RegAccess(ws)
-  regs.io <> cpu.regs
+  val mem = new TrivialPlat(ws, 256)
+  regs.io <> cpu.io.regs
+  mem.io <> cpu.io.io
+  io.dbg <> cpu.io.dbg
 }
+
 object CPUSim {
   def main(args: Array[String]) {
-    SimConfig.withWave.doSim(new CPUWrap(8, true)) { wrap =>
+    SimConfig.withWave.doSim(new CPUWrap(16, true)) { wrap =>
       wrap.clockDomain.forkStimulus(period = 2)
       val cpu = wrap.cpu
       def exec_insn(c: CPU, i: Int, exp_pc: Int) = {
@@ -260,16 +267,16 @@ object CPUSim {
         c.io.io.insn_addr.payload.toBigInt
       }
 
-      cpu.dbg.halt #= true
+      cpu.io.dbg.halt #= true
       cpu.io.io.insn_content.valid #= false
       cpu.io.io.insn_content.payload #= 0
       cpu.io.io.read_port.valid #= false
       cpu.io.io.read_port.payload #= 0
       cpu.io.io.write_port.ready #= false
-      cpu.dbg.sstep_insn #= false
-      cpu.dbg.sstep #= false
+      cpu.io.dbg.sstep_insn #= false
+      cpu.io.dbg.sstep #= false
 
-      cpu.clockDomain.waitRisingEdge(3)
+      wrap.clockDomain.waitRisingEdge(3)
 
       exec_insn(cpu, 0x1f11, 0)
 
@@ -280,6 +287,8 @@ object CPUSim {
 
       exec_insn(cpu, 0xcafe, 4)
       assert(wrap.regs.regs(0xe).toBigInt == 0xaf)
+      wrap.regs.regs(1) #= 0x0
+      exec_insn(cpu, 0x4d11, 6)
     }
   }
 }

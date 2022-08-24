@@ -1,0 +1,30 @@
+[*]
+[*] GTKWave Analyzer v3.3.104 (w)1999-2020 BSI
+[*] Tue Aug 23 23:44:29 2022
+[*]
+[dumpfile] "/home/ember/dev/absass/spinal_ass/simWorkspace/CPUWrap/test.vcd"
+[dumpfile_mtime] "Tue Aug 23 23:32:40 2022"
+[dumpfile_size] 106517244
+[savefile] "/home/ember/dev/absass/spinal_ass/cpuwrap.gtkw"
+[timestart] 0
+[size] 1988 1114
+[pos] -1 -1
+*-6.000000 38 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
+[treeopen] TOP.
+[treeopen] TOP.CPUWrap.
+[treeopen] TOP.CPUWrap.cpu_1.
+[sst_width] 486
+[signals_width] 294
+[sst_expanded] 1
+[sst_vpaned_height] 323
+@28
+TOP.CPUWrap.clk
+@22
+TOP.CPUWrap.cpu_1.io_dbg_cur_stage[3:0]
+TOP.CPUWrap.cpu_1.sp_v[15:0]
+TOP.CPUWrap.cpu_1.sr_out[15:0]
+TOP.CPUWrap.mem_io_insn_content_payload[15:0]
+@29
+TOP.CPUWrap.regs_io_busy
+[pattern_trace] 1
+[pattern_trace] 0

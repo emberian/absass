@@ -59,10 +59,10 @@ class RegAccess(ws: Int) extends Component {
   reg_r.assignDontCare()
   wren := False
   rgen := False
-
+  io.busy := True
   val reg_r_wire = regs.readWriteSync(reg_addr, reg_w, rgen, wren)
 
-  io.busy.setAsReg
+
   io.sp_v.setAsReg()
   io.dl_v.setAsReg()
   io.sr_v.setAsReg()
@@ -73,9 +73,8 @@ class RegAccess(ws: Int) extends Component {
   val dl_out = Reg(UInt(ws bits))
   val reg_access = new StateMachine {
     val watch: State = new State with EntryPoint {
-      onEntry { io.busy := False }
-      onExit { io.busy := True }
       whenIsActive {
+        io.busy := False
         import RegOps._
         wren := False
         rgen := True
@@ -207,4 +206,26 @@ class RegAccess(ws: Int) extends Component {
   }
 
   reg_access.setEncoding(binaryOneHot)
+}
+
+import RegOps._
+object RegSim {
+  def main(args: Array[String]) {
+
+    SimConfig.withWave.doSim(new RegAccess(16)) { regs =>
+      regs.clockDomain.forkStimulus(period = 2)
+
+      regs.clockDomain.waitRisingEdge()
+      regs.io.dl #= 1
+      regs.io.other #= 2
+      regs.io.go #= true
+      regs.io.op #= other_writeback
+      regs.clockDomain.waitRisingEdge()
+      regs.io.go#=false
+      waitUntil(!regs.io.busy.toBoolean)
+      regs.io.reg_addr #= 1
+      regs.clockDomain.waitRisingEdge(2)
+      assert(regs.io.reg_r.toBigInt == 2)
+    }
+  }
 }

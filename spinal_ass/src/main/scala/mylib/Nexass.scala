@@ -166,3 +166,10 @@ object Nexass {
     SpinalVerilog(new TopLvl).printPruned()
   }
 }
+
+
+object NexassVhdl {
+  def main(args: Array[String]) {
+    SpinalVhdl(new TopLvl).printPruned()
+  }
+}
