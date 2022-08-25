@@ -1,11 +1,11 @@
 pub const STEPPING: usize = 0;
 
-#[derive(Debug, PartialEq,Eq,Hash, Clone, Copy, enum_utils::IterVariants)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy, enum_utils::IterVariants)]
 pub enum MoveMode {
     Direct,
     Incr,
-    DecrPost,
     Decr,
+    DecrPost,
 }
 impl MoveMode {
     pub fn all() -> impl Iterator<Item = MoveMode> {
@@ -163,16 +163,16 @@ impl Insn {
                 d_deref,
             } => {
                 *dst as u16
-                    | ((*src as u16) << 4)
-                    | ((*s_mode as u16) << 11)
-                    | ((*s_deref as u16) << 13)
-                    | ((*d_deref as u16) << 10)
+                | ((*src as u16) << 4)
+                    | (*d_deref as u16) << 10 
                     | ((*d_mode as u16) << 8)
+                    | (*s_deref as u16) << 13 
+                    | ((*s_mode as u16) << 11)
                     | (0x4 << 12)
             }
             Insn::JumpLink { prog, link } => *link as u16 | ((*prog as u16) << 4) | (0x9 << 12),
             Insn::JumpCond { offset, cond } => {
-                *offset as u16 | ((*cond as u16) << 8) | (0x12 << 12)
+                (*offset as u8) as u16 | ((*cond as u16) << 8) | (0x8 << 12)
             }
             Insn::SubWord { dst, index, bytes } => {
                 *dst as u16 | ((*index as u16) << 4) | ((*bytes as u16) << 8) | (0x13 << 11)
@@ -212,10 +212,10 @@ impl Insn {
             0x3000 => {
                 let src = (val & 0xf0) >> 4;
                 let dst = val & 0xf;
-                let eq = (val & 0x100) >> 8;
-                let sn = (val & 0x200) >> 10;
-                let gt = (val & 0x400) >> 9;
-                let iv = (val & 0x800) >> 11;
+                let eq = val & 0x100;
+                let gt = val & 0x200;
+                let sn = val & 0x400;
+                let iv = val & 0x800;
                 Insn::Compare {
                     src: src as Reg,
                     dst: dst as Reg,
@@ -226,12 +226,12 @@ impl Insn {
                 }
             }
             0x4000..=0x7000 => {
-                let src = (val & 0xf0) >> 4;
                 let dst = val & 0xf;
-                let s_mode = (val & 0x1800) >> 11;
-                let s_deref = val & 0x2000;
-                let d_mode = (val & 0x300) >> 8;
-                let d_deref = val & 0x400;
+                let src = (val & 0xf0) >> 4;
+                let d_mode = (val >> 8) & 0x3;
+                let d_deref = (val >> 10) & 0x1;
+                let s_mode = (val >> 11) & 0x3;
+                let s_deref = val >> 13 & 0x1;
                 Insn::Move {
                     src: src as Reg,
                     dst: dst as Reg,
@@ -382,7 +382,7 @@ impl Insn {
             Insn::JumpLink { prog, link } => format!("JAL R{}, R{}", prog, link),
             Insn::JumpCond { cond, offset } => format!("JC R{}, {}", cond, offset),
             Insn::SubWord { dst, index, bytes } => {
-                format!("SWO R{}[{}..{}]", dst, index, index+bytes)
+                format!("SWO R{}[{}..{}]", dst, index, index + bytes)
             }
             Insn::SysReg { write, reg, sr } => {
                 if write {

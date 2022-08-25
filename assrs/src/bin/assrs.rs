@@ -111,7 +111,46 @@ pub fn main() {
                 eprintln!("no format argument");
             }
         },
+        Some("unused") => {
+            let all = (0..u16::MAX).map(|i| Insn::decode(i)).collect::<Vec<_>>();
+            let mut all_used = all.iter().map(|i| i.encode()).collect::<Vec<_>>();
+            for i in 0..u16::MAX {
+                let f = Insn::decode(i);
+                let fenc = f.encode();
+                if let Insn::NotSure { .. } = f {
+                    continue;
+                }
+                if i != fenc {
+                    println!(
+                        "enc(dec({:04x})) != {:04x}: {} did not examine bits {:016b} / {:016b}",
+                        i,
+                        fenc,
+                        f,
+                        i & !f.encode(),
+                        !i & f.encode()
+                    );
+                }
+            }
+            all_used.sort();
+            all_used.dedup();
+            let mut first = all_used[0];
+            let mut last = all_used[0];
+            for used in all_used {
+                if used != last + 1 {
+                    println!(
+                        "{:04x}-{:04x} {} {:04x} {}",
+                        first,
+                        last,
+                        last - first,
+                        (first ..=last).fold(0xffff, <u16 as std::ops::BitAnd>::bitand),
+                        Insn::decode(last + 1)
+                    );
 
+                    first = last;
+                }
+                last = used;
+            }
+        }
         Some(_) => eprintln!("no such command!"),
         None => eprintln!("no command given!"),
     }
