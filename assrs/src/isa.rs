@@ -1,6 +1,6 @@
 pub const STEPPING: usize = 0;
 
-#[derive(Debug, Hash, Clone, Copy, enum_utils::IterVariants)]
+#[derive(Debug, PartialEq,Eq,Hash, Clone, Copy, enum_utils::IterVariants)]
 pub enum MoveMode {
     Direct,
     Incr,
@@ -172,15 +172,15 @@ impl Insn {
             }
             Insn::JumpLink { prog, link } => *link as u16 | ((*prog as u16) << 4) | (0x9 << 12),
             Insn::JumpCond { offset, cond } => {
-                *offset as u16 | ((*cond as u16) << 8) | (0x12 << 11)
+                *offset as u16 | ((*cond as u16) << 8) | (0x12 << 12)
             }
             Insn::SubWord { dst, index, bytes } => {
                 *dst as u16 | ((*index as u16) << 4) | ((*bytes as u16) << 8) | (0x13 << 11)
             }
             Insn::SysReg { write, reg, sr } => {
-                (0xau16 << 12) | ((*write as u16) << 12) | ((*reg as u16) << 8) | (*sr as u16)
+                (0xa << 12) | ((*write as u16) << 12) | ((*reg as u16) << 8) | (*sr as u16)
             }
-            Insn::SmallImm { dst, val } => (0xc000 << 12) | ((*val as u16) << 4) | (*dst as u16),
+            Insn::SmallImm { dst, val } => (0xc << 12) | ((*val as u16) << 4) | (*dst as u16),
             Insn::NotSure { value } => *value,
         }
     }
@@ -260,7 +260,7 @@ impl Insn {
                 }
                 _ => {
                     let dst = val & 0xf;
-                    let index = (val & 0xf) >> 4;
+                    let index = (val & 0xf0) >> 4;
                     let bytes = (val & 0x700) >> 8;
                     Insn::SubWord {
                         dst: dst as Reg,
