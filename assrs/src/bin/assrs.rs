@@ -75,7 +75,6 @@ pub fn main() {
             m.exec(i);
             println!("after {}\t\t R1 = {}", i.to_asm(), m.regs[1]);
             println!("{:4x}", i.encode());
-
         }
 
         Some("gen_opcode") => match std::env::args().nth(2).as_deref() {
@@ -98,9 +97,14 @@ pub fn main() {
             Some("ppm") => {
                 println!("P3");
                 println!("256 256 255");
+                let mut l = (0, 0, 0);
                 for insn in 0..=std::u16::MAX {
                     let insn = Insn::decode(insn);
                     let col = insn.color();
+                    if col != l {
+                        l = col;
+                        eprintln!("next row is a {}", insn);
+                    }
                     println!("{} {} {}", col.0, col.1, col.2);
                 }
             }

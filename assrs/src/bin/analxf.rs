@@ -1,44 +1,64 @@
+#![recursion_limit = "100000"]
+
 use self::Observable::*;
 use self::SymbolicValue::*;
 use assrs::*;
 use comfy_table::presets::UTF8_FULL;
-use std::fmt::Pointer;
+use joinery::Joinable;
+use std::collections::HashMap;
 use std::io::prelude::*;
 use std::rc::Rc;
 // everything else about the interpreter is bone standard for an abstract domain.
-#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Hash)]
+#[derive(Clone, Eq, Hash, PartialOrd, Ord, Debug)]
 enum SymbolicValue {
-    // start value of a register. we assume nothing about these except RegInit(x, z) == RegInit(y, w) iff x == y && z == w
+    // start value of a register, possibly offset. we assume nothing about these except RegInit(x, z) == RegInit(y, w) iff x == y && z == w
     RegInit(usize, isize),
 
-    // start value of memory. we assume nothing about these except MemInit(x) == MemInit(y) iff x == y
-    MemInit(usize),
+    // start value of memory. we assume nothing about these except MemInit(x,z) == MemInit(y,w) iff x == y && z sym_eq w
+    MemInit(usize, Rc<SymbolicValue>),
     Incr(Rc<SymbolicValue>),
     Decr(Rc<SymbolicValue>),
     MemVal(Rc<SymbolicValue>, Rc<SymbolicValue>),
     RegVal(usize, Rc<SymbolicValue>, usize),
 }
 
+impl PartialEq for SymbolicValue {
+    fn eq(&self, other: &Self) -> bool {
+        self.sym_eq(other)
+    }
+}
 impl SymbolicValue {
     fn sym_eq(&self, other: &SymbolicValue) -> bool {
-        match (&*self, &*other) {
+        self.sym_eq_msg(other, &mut Vec::new())
+    }
+    fn sym_eq_msg(&self, other: &SymbolicValue, msg: &mut Vec<u8>) -> bool {
+        let r = match (&*self, &*other) {
             (RegInit(r0, off1), RegInit(r1, off2)) => r0 == r1 && off1 == off2,
-            (MemInit(m0), MemInit(m1)) => m0 == m1,
+            (MemInit(m0, iv0), MemInit(m1, iv1)) => m0 == m1 && iv0.sym_eq(iv1),
             (Incr(a), Incr(b)) => a.sym_eq(&b),
             (Decr(a), Decr(b)) => a.sym_eq(&b),
             (MemVal(a0, a1), MemVal(b0, b1)) => a0.sym_eq(&b0) && a1.sym_eq(&b1),
             (RegVal(r0, a, t0), RegVal(r1, b, t1)) => r0 == r1 && a.sym_eq(&b) && t0 == t1,
             (RegInit(r0, _off), RegVal(r1, guess, _t0)) => r0 == r1 && self.sym_eq(&guess),
             (RegVal(..), RegInit(..)) => other.sym_eq(self),
-            (MemInit(_t0), MemVal(_addr, guess)) => self.sym_eq(&guess),
+            (MemInit(..), MemVal(_addr, guess)) => todo!(),
             (MemVal(..), MemInit(..)) => other.sym_eq(self),
-            (MemInit(_), _) => false,
-            (_, MemInit(_)) => false,
+            (MemInit(..), _) | (_, MemInit(..)) => false,
             (_, _) => false,
+        };
+        if r {
+            if msg.capacity() != 0 {
+                writeln!(msg, "{} === {}", self, other).unwrap();
+            }
+        } else {
+            if msg.capacity() != 0 {
+                writeln!(msg, "{} =/= {}", self, other).unwrap();
+            }
         }
+        r
     }
 }
-impl std::fmt::Debug for SymbolicValue {
+impl std::fmt::Display for SymbolicValue {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match &*Symmer::default().shrink(&Rc::new(self.clone())) {
             RegInit(v, off) => write!(
@@ -52,11 +72,11 @@ impl std::fmt::Debug for SymbolicValue {
                     "".into()
                 }
             ),
-            MemInit(v) => write!(f, "M{}", v),
-            Incr(v) => write!(f, "({:?} + 1)", v),
-            Decr(v) => write!(f, "({:?} - 1)", v),
-            MemVal(addr, best_guess) => write!(f, "rd({:?} @ {:?})", best_guess, addr),
-            RegVal(r, best_guess, t) => write!(f, "R{}({:?} @ {:?})", r, best_guess, t),
+            MemInit(v, orig) => write!(f, "M{}(*{})", v, orig),
+            Incr(v) => write!(f, "({}+ 1)", v),
+            Decr(v) => write!(f, "({}- 1)", v),
+            MemVal(addr, best_guess) => write!(f, "rd({}@{})", best_guess, addr),
+            RegVal(r, best_guess, t) => write!(f, "R{}({}@{})", r, best_guess, t),
         }
     }
 }
@@ -69,12 +89,21 @@ enum Observable {
     LoadMem(Rc<SymbolicValue>),
 }
 
-#[derive(Hash, PartialEq, Eq, Clone, Debug)]
+#[derive(Clone, Eq, Hash)]
 struct FinalState {
     regs: [Rc<SymbolicValue>; 16],
     memory: Vec<(Rc<SymbolicValue>, Rc<SymbolicValue>)>,
 }
-
+impl PartialEq for FinalState {
+    fn eq(&self, other: &Self) -> bool {
+        self.equivalent(other, &mut Vec::new())
+    }
+}
+impl FinalState {
+    fn structural_eq(&self, other: &Self) -> bool {
+        self.regs == other.regs && self.memory == other.memory
+    }
+}
 #[derive(Debug, Clone)]
 struct Symmer {
     regs: [Rc<SymbolicValue>; 16],
@@ -92,10 +121,18 @@ impl Symmer {
             }
         }
         self.mems += 1;
-        Rc::new(MemVal(addr.clone(), Rc::new(MemInit(self.mems - 1))))
+        Rc::new(MemVal(
+            addr.clone(),
+            Rc::new(MemInit(self.mems - 1, addr.clone())),
+        ))
     }
 
     fn store(&mut self, addr: &Rc<SymbolicValue>, val: &Rc<SymbolicValue>) {
+        match (addr, &**val) {
+            (addr, MemInit(_, startval)) if addr.sym_eq(startval) => return,
+            _ => (),
+        }
+
         self.observe.push(SetMem(addr.clone(), val.clone()));
     }
 
@@ -128,51 +165,51 @@ impl Symmer {
 
     fn correct(&mut self, i: Instance) {
         use assrs::MoveMode::*;
-        let s = self.getreg(i.sp);
-        let s_val = if let MoveMode::Decr = i.sp_mode {
+        let s = self.getreg(i.src);
+        let s_val = if let MoveMode::Decr = i.s_mode {
             let s_dec = self.decr(&s);
-            self.setreg(i.sp, &s_dec);
+            self.setreg(i.src, &s_dec);
             s_dec
         } else {
             s.clone()
         };
 
-        let s = if i.src_indir { self.load(&s_val) } else { s };
+        let s = if i.s_deref { self.load(&s_val) } else { s };
 
-        match i.sp_mode {
+        match i.s_mode {
             Incr => {
                 let n = self.incr(&s);
-                self.setreg(i.sp, &n)
+                self.setreg(i.src, &n)
             }
             DecrPost => {
                 let n = self.decr(&s);
-                self.setreg(i.sp, &n)
+                self.setreg(i.src, &n)
             }
             Decr | Direct => (),
         }
 
-        let d_val = self.getreg(i.dl);
-        let d_val = match i.dl_mode {
+        let d_val = self.getreg(i.dst);
+        let d_val = match i.d_mode {
             Decr => self.decr(&d_val),
             _ => d_val,
         };
 
-        if i.dst_indir {
+        if i.d_deref {
             self.store(&d_val, &s)
         } else {
-            self.setreg(i.dl, &s)
+            self.setreg(i.dst, &s)
         }
-        let d_val = self.getreg(i.dl);
-        match i.dl_mode {
-            DecrPost => self.setreg(i.dl, &self.decr(&d_val)),
-            Incr => self.setreg(i.dl, &self.incr(&d_val)),
+        let d_val = self.getreg(i.dst);
+        match i.d_mode {
+            DecrPost => self.setreg(i.dst, &self.decr(&d_val)),
+            Incr => self.setreg(i.dst, &self.incr(&d_val)),
             Decr | Direct => (),
         }
     }
 
     fn shrink(&self, val: &Rc<SymbolicValue>) -> Rc<SymbolicValue> {
         match &**val {
-            MemInit(_) | RegInit(..) => val.clone(),
+            MemInit(..) | RegInit(..) => val.clone(),
             Incr(i) => self.incr(&self.shrink(i)),
             Decr(i) => self.decr(&self.shrink(i)),
             MemVal(_, guess) => self.shrink(guess),
@@ -180,49 +217,54 @@ impl Symmer {
         }
     }
 
-    fn incorrect(&mut self, i: Instance) {
+    fn incorrect(&mut self, i: Instance, fix: bool) {
         use assrs::MoveMode::*;
-        let sp = self.getreg(i.sp);
-        let dl = self.getreg(i.dl);
+        let sp = self.getreg(i.src);
+        let mut dl = self.getreg(i.dst);
 
-        let sp_out = match i.sp_mode {
+        let sp_out = match i.s_mode {
             Direct => sp.clone(),
             Incr => self.incr(&sp),
             DecrPost | Decr => self.decr(&sp),
         };
-        let sp_in = if let Decr = i.sp_mode {
+        let sp_in = if let Decr = i.s_mode {
             self.decr(&sp)
         } else {
             sp.clone()
         };
-        let mut dl_out = match i.dl_mode {
+        if fix {
+            if i.dst == i.src {
+                dl = sp_out.clone();
+            }
+        }
+        let mut dl_out = match i.d_mode {
             Direct => dl.clone(),
             Incr => self.incr(&dl),
             DecrPost | Decr => self.decr(&dl),
         };
-        let dl_in = if let Decr = i.dl_mode {
+        let dl_in = if let Decr = i.d_mode {
             self.decr(&dl)
         } else {
             dl.clone()
         };
 
-        let val_to_store = if i.src_indir {
+        let val_to_store = if i.s_deref {
             self.load(&sp_in)
         } else {
             sp_out.clone()
         };
 
-        if i.dst_indir {
+        if i.d_deref {
             self.store(&dl_in, &val_to_store);
         } else {
-            dl_out = match i.dl_mode {
+            dl_out = match i.d_mode {
                 Direct => val_to_store.clone(),
                 Incr => self.incr(&val_to_store),
                 DecrPost | Decr => self.decr(&val_to_store),
             };
         }
-        self.setreg(i.sp, &sp_out);
-        self.setreg(i.dl, &dl_out);
+        self.setreg(i.src, &sp_out);
+        self.setreg(i.dst, &dl_out);
     }
 
     fn final_state(&self) -> FinalState {
@@ -253,42 +295,101 @@ impl FinalState {
         let mut out = true;
 
         for reg in 0..16 {
-            if !self.regs[reg].sym_eq(&other.regs[reg]) {
+            writeln!(
+                msg,
+                "examine R{} (us = {}, them = {})",
+                reg, self.regs[reg], other.regs[reg]
+            )
+            .unwrap();
+            if !self.regs[reg].sym_eq_msg(&other.regs[reg], msg) {
                 writeln!(
                     msg,
-                    "R{} differed (us = {:?}, them = {:?})",
+                    "R{} differed (us = {}, them = {})",
                     reg, self.regs[reg], other.regs[reg],
                 )
                 .unwrap();
                 out = false;
-                break;
             }
         }
 
-        let mut sm = self.memory.clone();
-        sm.sort_by_key(|(addr, _)| addr.clone());
-        let mut om = other.memory.clone();
-        om.sort_by_key(|(addr, _)| addr.clone());
+        let sm: HashMap<_, _> = self.memory.clone().into_iter().collect();
+        let om: HashMap<_, _> = other.memory.clone().into_iter().collect();
 
-        for (us, them) in sm.into_iter().zip(om.into_iter()) {
-            if !us.0.sym_eq(&them.0) || !us.1.sym_eq(&them.1) {
-                writeln!(
-                    msg,
-                    "final memory state differs (us = {:?}, them = {:?})",
-                    us, them
-                )
-                .unwrap();
+        for us in &sm {
+            if let Some(v) = om.get(us.0) {
+                if !us.1.sym_eq(v) {
+                    writeln!(
+                        msg,
+                        "Memory at {} differed (us = {}, them = {})",
+                        us.0, us.1, v,
+                    )
+                    .unwrap();
+                    out = false;
+                } else {
+                    writeln!(
+                        msg,
+                        "examined addr {} in (them = {}, us = {}) :gucci:",
+                        us.0, v, us.1
+                    )
+                    .unwrap();
+                }
+            } else {
+                writeln!(msg, "Memory at {} was not present in the other state", us.0,).unwrap();
                 out = false;
             }
         }
+        for us in &om {
+            if let Some(v) = sm.get(us.0) {
+                if !us.1.sym_eq(v) {
+                    writeln!(
+                        msg,
+                        "Memory at {} differed (them = {}, us = {})",
+                        us.0, us.1, v,
+                    )
+                    .unwrap();
+                    out = false;
+                } else {
+                    writeln!(
+                        msg,
+                        "examined addr {} in (them = {}, us = {}) :gucci:",
+                        us.0, v, us.1
+                    )
+                    .unwrap();
+                }
+            } else {
+                writeln!(msg, "Memory at {} was not present in the other state", us.0,).unwrap();
+                out = false;
+            }
+        }
+        if out {
+            assert!(sm == om);
+            writeln!(msg, "/compgood").unwrap();
+        }
 
         if !out {
-            writeln!(msg, "our effs: {:?}\nees effs:{:?}", self, other).unwrap();
+            writeln!(msg, "/compfail").unwrap();
         }
         out
     }
 }
 
+impl std::fmt::Debug for FinalState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let regs = self
+            .regs
+            .iter()
+            .enumerate()
+            .filter(|(i, r)| match &***r {
+                RegInit(r, 0) if r == i => false,
+                _ => true,
+            })
+            .collect::<Vec<_>>();
+        f.debug_struct("FinalState")
+            .field("regs", &regs)
+            .field("memory", &self.memory)
+            .finish()
+    }
+}
 impl std::fmt::Display for FinalState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use comfy_table::*;
@@ -302,18 +403,19 @@ impl std::fmt::Display for FinalState {
 
         let mut cur_row = Row::new();
         for (rn, reg) in self.regs.iter().enumerate() {
-            if let RegInit(r, val) = &**reg {
-                if *r != rn || *val != 0 {
-                    cur_row.add_cell(Cell::new(format!("R{} = {:?}", rn, reg)));
+            match &**reg {
+                RegInit(r, val) if *r == rn && *val == 0 => {}
+                _ => {
+                    cur_row.add_cell(Cell::new(format!("R{} = {}", rn, reg)));
                     i += 1;
                 }
-                if i == 4 {
-                    let mut nr = Row::new();
-                    std::mem::swap(&mut nr, &mut cur_row);
-                    println!("{:?}", nr);
-                    regs_tb.add_row(nr);
-                    i = 0;
-                }
+            }
+
+            if i == 4 {
+                let mut nr = Row::new();
+                std::mem::swap(&mut nr, &mut cur_row);
+                regs_tb.add_row(nr);
+                i = 0;
             }
         }
         if cur_row.cell_count() != 0 {
@@ -322,7 +424,7 @@ impl std::fmt::Display for FinalState {
         let mut cur_row = Row::new();
         i = 0;
         for (addr, val) in &self.memory {
-            cur_row.add_cell(Cell::new(format!("Mem[{:?}] := {:?}", addr, val)));
+            cur_row.add_cell(Cell::new(format!("Mem[{}] := {}", addr, val)));
             i += 1;
             if i == 4 {
                 let mut nr = Row::new();
@@ -350,14 +452,40 @@ impl Default for Symmer {
         }
     }
 }
-#[derive(Copy, Clone)]
+#[derive(Copy, PartialEq, Eq, Clone)]
 struct Instance {
-    sp: usize,
-    dl: usize,
-    dst_indir: bool,
-    dl_mode: MoveMode,
-    src_indir: bool,
-    sp_mode: MoveMode,
+    src: usize,
+    dst: usize,
+    d_deref: bool,
+    d_mode: MoveMode,
+    s_deref: bool,
+    s_mode: MoveMode,
+}
+impl Instance {
+    fn to_inst(self) -> assrs::Insn {
+        let Instance {
+            src,
+            dst,
+            d_deref,
+            d_mode,
+            s_deref,
+            s_mode,
+        } = self;
+
+        assrs::Insn::Move {
+            src,
+            dst,
+            s_mode,
+            s_deref,
+            d_mode,
+            d_deref,
+        }
+    }
+}
+impl std::fmt::Display for Instance {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.to_inst().fmt(f)
+    }
 }
 impl std::fmt::Debug for Instance {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -373,10 +501,10 @@ impl std::fmt::Debug for Instance {
         write!(
             f,
             "XF {}{}, {}{}",
-            if self.dst_indir { "*" } else { "" },
-            operand(self.dl, self.dl_mode),
-            if self.src_indir { "*" } else { "" },
-            operand(self.sp, self.sp_mode)
+            if self.d_deref { "*" } else { "" },
+            operand(self.dst, self.d_mode),
+            if self.s_deref { "*" } else { "" },
+            operand(self.src, self.s_mode)
         )
     }
 }
@@ -432,12 +560,12 @@ impl InstQuantifier {
         )
         .map(
             |(src_indir, src_mode, dst_indir, dst_mode, src_reg, dst_reg)| Instance {
-                dst_indir,
-                src_indir,
-                dl_mode: dst_mode,
-                sp_mode: src_mode,
-                sp: src_reg,
-                dl: dst_reg,
+                d_deref: dst_indir,
+                s_deref: src_indir,
+                d_mode: dst_mode,
+                s_mode: src_mode,
+                src: src_reg,
+                dst: dst_reg,
             },
         )
     }
@@ -454,24 +582,24 @@ fn correct_isnt_incorrect() -> (String, bool) {
         let mut tr_g = Symmer::default();
         let mut tr_b = Symmer::default();
         tr_g.correct(inst);
-        tr_b.incorrect(inst);
+        tr_b.incorrect(inst, false);
         solutions.push((inst, tr_g.clone()));
         dissolutions.push((inst, tr_b.clone()));
 
-        let sp_diff = !tr_g.regs[inst.sp].sym_eq(&tr_b.regs[inst.sp]);
-        let dl_diff = !tr_g.regs[inst.dl].sym_eq(&tr_b.regs[inst.dl]);
+        let sp_diff = !tr_g.regs[inst.src].sym_eq(&tr_b.regs[inst.src]);
+        let dl_diff = !tr_g.regs[inst.dst].sym_eq(&tr_b.regs[inst.dst]);
         if sp_diff || dl_diff {
             bad += 1;
             writeln!(&mut s, "Generated an incorrect instance {:?}\nCorrect version computed:\n\tR{r} = {:?}\n\teffs = {:?}\n\nIncorrect version computed:\n\tR{r} = {:?}\n\teffs = {:?}\n===============================================================================\n", 
                 inst,
-                tr_g.shrink(&tr_g.regs[inst.sp]),
+                tr_g.shrink(&tr_g.regs[inst.src]),
                 tr_g.observe,
-                tr_b.shrink(&tr_b.regs[inst.sp]),
+                tr_b.shrink(&tr_b.regs[inst.src]),
                 tr_b.observe,
-                r=inst.sp,
+                r=inst.src,
             ).unwrap();
         } else {
-            good.push((inst, tr_g.regs[inst.sp].clone()));
+            good.push((inst, tr_g.regs[inst.src].clone()));
         }
     }
 
@@ -495,17 +623,18 @@ fn direct_dsts_ignore_src_mode_same_reg() -> (String, bool) {
         for smode in MoveMode::all() {
             let mut sm_bhv = Symmer::default();
             sm_bhv.correct(Instance {
-                sp_mode: smode,
+                s_mode: smode,
                 ..inst
             });
+            let mut subs = vec![];
             if !sm_bhv
                 .final_state()
-                .equivalent(&reference_behavior.final_state(), &mut s)
+                .equivalent(&reference_behavior.final_state(), &mut subs)
             {
                 bad += 1;
-                writeln!(&mut s, "Generated an incorrect instance {1:?} which does not match {0:?}\n====================================================\n", 
+                writeln!(&mut s, "Generated an incorrect instance {1:?} which does not match {0:?} because\n{2:?}\n====================================================\n", 
                     inst,
-                    Instance{sp_mode:smode,..inst}).unwrap();
+                    Instance{s_mode:smode,..inst}, String::from_utf8_lossy(&subs)).unwrap();
             } else {
                 good.push(inst);
             }
@@ -514,39 +643,58 @@ fn direct_dsts_ignore_src_mode_same_reg() -> (String, bool) {
 
     writeln!(
         &mut s,
-        "{} / {} cases were bad ({}/4 = {})",
+        "{} / {} cases were bad ({} extra encodings)",
         bad,
         bad + good.len(),
-        bad,
-        bad as f32 / 4f32
+        (bad as f32 + good.len() as f32).log2() - 1.
     )
     .unwrap();
     (String::from_utf8(s).unwrap(), bad != 20)
 }
 
 fn same_reg(i: impl Iterator<Item = Instance>) -> impl Iterator<Item = Instance> {
-    i.filter(|i| i.sp == i.dl && i.sp == 7)
+    i.filter(|i| i.src == i.dst && i.src == 7)
 }
 
 fn quotient<I: IntoIterator<Item = Instance>>(
     insts: I,
     mut model: impl FnMut(&mut Symmer, Instance),
-) -> (String, bool) {
-    let mut msg = vec![];
-    let mut classes = std::collections::HashMap::new();
+    desc: impl Into<String>,
+    expect_classes: usize,
+) -> QuotientReport {
+    let mut classes = HashMap::new();
     for inst in insts {
         let mut tr = Symmer::default();
         model(&mut tr, inst);
         let final_st = tr.final_state();
+
         let class = classes.entry(final_st.clone()).or_insert(Vec::new());
         class.push(inst);
-        assert!(final_st.equivalent(classes.get_key_value(&final_st).unwrap().0, &mut msg));
     }
 
-    for (representative_state, instances) in &classes {
+    // shrink classes
+    println!("shrink classes");
+    let mut msg = vec![];
+    let mut new_classes: HashMap<FinalState, Vec<Instance>> = HashMap::new();
+    'outer: for (rep, insts) in &classes {
+        for (new_rep, new_insts) in &mut new_classes {
+            let mut submsg = vec![];
+            if rep.equivalent(new_rep, &mut submsg) {
+                writeln!(msg, "WARN WARN WARN equivalence isn't! \n{:?} \nand\n{:?}\n claim to be equivalent but were different classes ({:?} and {:?}). Reason:\n{}",
+                rep,new_rep, insts.clone().join_with(";").to_string(), new_insts.clone().join_with(";").to_string(), String::from_utf8_lossy(&submsg)).unwrap();
+                new_insts.extend(insts);
+                continue 'outer;
+            }
+        }
+        new_classes.insert(rep.clone(), insts.clone());
+    }
+
+    assert!(new_classes == classes);
+
+    for (representative_state, instances) in &new_classes {
         writeln!(
             &mut msg,
-            "Class with representative action\n{}\nhas {} instances:",
+            "Class with representative action\n{0:?}\n{0}\nhas {1} instances:",
             representative_state,
             instances.len()
         )
@@ -556,37 +704,120 @@ fn quotient<I: IntoIterator<Item = Instance>>(
         }
     }
 
-    writeln!(&mut msg, "{} total classes", classes.len()).unwrap();
+    writeln!(&mut msg, "{} total classes", new_classes.len()).unwrap();
 
-    (String::from_utf8(msg).unwrap(), classes.len() != 10081)
+    QuotientReport {
+        convenient_classes: new_classes
+            .iter()
+            .map(|(r, i)| {
+                (
+                    i.iter()
+                        .map(|i| ((i.to_inst().encode() & 0x3f) >> 8) as u8)
+                        .collect(),
+                    format!("{}", r),
+                )
+            })
+            .collect(),
+        surprised: new_classes.len() != expect_classes,
+
+        rich_classes: new_classes,
+        log: String::from_utf8_lossy(&msg).into(),
+        desc: desc.into(),
+    }
 }
 
+struct QuotientReport {
+    convenient_classes: Vec<(Vec<u8>, String)>,
+    rich_classes: HashMap<FinalState, Vec<Instance>>,
+    desc: String,
+    log: String,
+    surprised: bool,
+}
+
+/*
+fn html_quotient(q: QuotientReport) -> String {
+    use typed_html::{dom::DOMTree, *};
+    let revix = q
+        .convenient_classes
+        .iter()
+        .map(|(c, s)| c.iter().map(|c| (*c, s.clone())))
+        .flatten()
+        .collect::<HashMap<_, _>>();
+    let mut doc: DOMTree<String> = html! {
+        <html>
+            <head><title>"ANAL XF REPORT"</title></head>
+            <body>
+            <h1>"ANAL XF REPORT"</h1>
+            <p>{text!("This report represents {} equivalences classes of all autoautomodifying XF instructions according to their semantics in the {} model",
+        q.convenient_classes.len(), q.desc)}</p>
+
+            <table>
+            <tr><th colspan=4>"Direct"</th><th colspan=4>"Indirect"</th></tr>
+            <tr><th>"R"</th><th>"R+"</th><th>"R-"</th><th>"-R"</th><th>"R"</th><th>"R+"</th><th>"R-"</th><th>"-R"</th></tr>
+            { (0..8).map(|rowctr|
+
+            html!{<tr>
+                {
+                (0..8).map(|colctr| {
+                    html!{<td>{revix.get(&((rowctr as u8) << 3 | (colctr as u8))).unwrap_or(&"missing".into())}</td>}
+            }).chain(vec!(html!{<td colspan="4">"Direct"</td>},html!{<td colspan="4">"Indirect"</td>})
+
+            )}</tr> }
+
+        )} </table>
+        </body>
+        </html>
+    };
+    doc.to_string()
+}
+*/
 fn main() {
     let verbose = std::env::args().nth(1) == Some("-v".into());
 
     let (report, surprised) = correct_isnt_incorrect();
     if surprised || verbose {
-        println!("{}", report)
+        println!("{}", report);
+        println!("/correct isnt incorrect");
     };
     let (report, surprised) = direct_dsts_ignore_src_mode_same_reg();
     if surprised || verbose {
-        println!("{}", report)
+        println!("{}", report);
+        println!("/direct dsts ignore");
     };
-    let (report, surprised) = quotient(InstQuantifier::all().into_iter(), Symmer::correct);
+    //let (report, surprised) = quotient(InstQuantifier::all().into_iter(), Symmer::correct, 12305);
     if surprised || verbose {
-        println!("{}", report)
+        //println!("{}", report)
     };
 
-    let (report, surprised) =
-        quotient(same_reg(InstQuantifier::all().into_iter()), Symmer::correct);
-    if surprised || verbose {
-        println!("{}", report)
-    };
-    let (report, surprised) = quotient(
+    let rep = quotient(
         same_reg(InstQuantifier::all().into_iter()),
-        Symmer::incorrect,
+        Symmer::correct,
+        "correct",
+        0,
+    );
+    if rep.surprised || verbose {
+        println!("{}", report);
+        println!("/correct");
+    };
+    let rep = quotient(
+        same_reg(InstQuantifier::all().into_iter()),
+        |sym, i| sym.incorrect(i, false),
+        "unfixed incorrect",
+        0,
     );
     if surprised || verbose {
-        println!("{}", report)
+        println!("{}", report);
+        println!("/incorrect nofix");
+    };
+    let rep = quotient(
+        same_reg(InstQuantifier::all().into_iter()),
+        |sym, i| sym.incorrect(i, true),
+        "fixed incorrect",
+        0,
+    );
+    if surprised || verbose {
+        println!("{}", report);
+        println!("/incorrect fix");
     };
 }
+

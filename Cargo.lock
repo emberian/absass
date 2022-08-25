@@ -256,14 +256,17 @@ version = "0.1.0"
 dependencies = [
  "actix-web",
  "comfy-table",
+ "diff",
  "enum-utils",
  "env_logger",
  "futures",
  "itertools",
+ "joinery",
  "mlua",
  "oneshot",
  "serde",
  "serde_json",
+ "vec_map",
 ]
 
 [[package]]
