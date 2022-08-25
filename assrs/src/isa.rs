@@ -69,6 +69,7 @@ impl ArithOp {
 }
 #[derive(Debug, Hash, Clone, Copy)]
 pub enum Insn {
+    DistinguishedExceptionGenerator,
     Logic {
         src: Reg,
         dst: Reg,
@@ -131,6 +132,7 @@ impl std::fmt::Display for Insn {
 impl Insn {
     pub fn encode(&self) -> u16 {
         match self {
+            Insn::DistinguishedExceptionGenerator => 0,
             Insn::Logic { src, dst, op } => {
                 *dst as u16 | ((*src as u16) << 4) | ((*op as u16) << 8) | (0x1 << 12)
             }
@@ -187,6 +189,7 @@ impl Insn {
 
     pub fn decode(val: u16) -> Insn {
         match val & 0xf000 {
+            0 if val == 0 => Insn::DistinguishedExceptionGenerator,
             0x1000 => {
                 let src = (val & 0xf0) >> 4;
                 let dst = val & 0xf;
@@ -293,6 +296,7 @@ impl Insn {
 
     pub fn brief(&self) -> Option<&'static str> {
         match self {
+            Insn::DistinguishedExceptionGenerator => Some("Deg"),
             Insn::Logic { op, .. } => Some(match op {
                 0b0000 => "F",
                 0b0001 => "NOR",
@@ -343,6 +347,7 @@ impl Insn {
 
     pub fn to_asm(&self) -> String {
         match *self {
+            Insn::DistinguishedExceptionGenerator => "EXC".into(),
             Insn::Logic { src, dst, .. } => format!("{} R{}, R{}", self.brief().unwrap(), dst, src),
             Insn::Arith { op, src, dst, si } => {
                 if !si {
@@ -393,13 +398,18 @@ impl Insn {
             }
             Insn::SmallImm { dst, val } => format!("SI R{}, {}", dst, val),
             Insn::NotSure { value } => {
-                format!(".BYTE 0x{:x}\n.BYTE 0x{:x}", (value & 0xff00) >> 8, value & 0xff)
+                format!(
+                    ".BYTE 0x{:02x}, 0x{:02x}",
+                    (value & 0xff00) >> 8,
+                    value & 0xff
+                )
             }
         }
     }
 
     pub fn color(&self) -> (u8, u8, u8) {
         match self {
+            Insn::DistinguishedExceptionGenerator => (42, 69, 7),
             Insn::Logic { .. } => (255, 0, 0),
             Insn::Arith { .. } => (255, 255, 0),
             Insn::Compare { .. } => (0, 255, 0),

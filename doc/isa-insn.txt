@@ -10,6 +10,11 @@ C syntax is used in explications; familiarity with it is assumed.
 
 Ranges of [a:b] are inclusive of both endpoints (forgive me).
 
+- I[15:0] == 0 ( DISTINGUISHED EXCEPTION GENERATOR )
+
+	Cause the exception handler to become active, clearing bit 0 of SR 2,
+	setting SR 8 to R0+2, setting R0 to the new SR 2 value, and setting SR 9 to 1.
+	
 - I[15:12] == 0b0001   ( BITWISE INSTRUCTIONS )
 	- I[3:0]:  (D) Destination Register, LHS (0-15)
 	- I[7:4]:  (S) Source Register, RHS (0-15)

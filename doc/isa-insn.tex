@@ -52,6 +52,12 @@ instruction codings do not vary with word size. For a given instantiation, the
 device is specified as ``ASS16/W'', where W is the word size---for example,
 ``ASS16/32'' would be a 32-bit bus, 16-bit instruction ASS CPU.
 
+\section{Distinguished Exception Generator}
+
+\noindent\ins\rg 16,0. \code{== 0}
+
+Enter the exception handling routine with cause == 1.
+
 \section{Bitwise Instructions}
 
 \noindent\ins\rg 16,12. \code{== 0b0001}

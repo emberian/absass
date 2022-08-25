@@ -83,6 +83,7 @@ class Assembler
 		@emit_word 0
 
 	@OPCODE:
+		EXC: 0x0
 		LOGIC: 0x1000
 		ARITH: 0x2000
 		COMP: 0x3000
@@ -418,6 +419,9 @@ class Assembler
 		else
 			@die "unknown instruction " .. word, s
 
+	DECL_INSN "EXC", (s) =>
+		@ok { insn: "exc" }, s
+
 	DECL_INSN "MOV", (s) =>
 		dst = @p_reg s
 		return @die "expected dest reg", s unless dst
@@ -684,6 +688,8 @@ class Assembler
 	}
 
 	DECL_EMIT "nop", (ins) =>
+
+	DECL_EMIT "exc", (ins) => @emit 0
 
 	DECL_EMIT "logic", (ins) => @e_logic ins.data
 

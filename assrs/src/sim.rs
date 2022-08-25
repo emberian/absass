@@ -52,6 +52,11 @@ pub enum StepOut {
     Halt,
 }
 
+pub enum ExcCause {
+    DistinguishedExceptionGenerator,
+    DivZero,
+
+}
 impl Machine {
     pub const FREQ: Word = 0xa55;
 
@@ -63,6 +68,10 @@ impl Machine {
         *self = Machine::default();
     }
 
+    fn handle_exc(&mut self, cause: ExcCause) {
+        todo!()
+    }
+
     pub fn exec(&mut self, i: Insn) -> StepOut {
         use StepOut::*;
         #[cfg(debug_assertions)]
@@ -70,6 +79,7 @@ impl Machine {
 
         let mut pc = self.pc() + 2;
         match i {
+            Insn::DistinguishedExceptionGenerator => self.handle_exc(ExcCause::DistinguishedExceptionGenerator),
             Insn::Logic { src, dst, op } => {
                 let mut res: Word = 0;
                 for i in 0..(WORDSZ * 8) {
