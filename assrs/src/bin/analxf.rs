@@ -734,6 +734,15 @@ struct QuotientReport {
     surprised: bool,
 }
 
+impl std::fmt::Display for QuotientReport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.surprised {
+            writeln!(f, "WARNING: {}: {} classes were generated\n{}", self.desc, self.rich_classes.len(), self.log)
+        } else {
+            writeln!(f, "{}: {} classes generated, as expected.", self.desc, self.rich_classes.len())
+        }
+    }
+}
 /*
 fn html_quotient(q: QuotientReport) -> String {
     use typed_html::{dom::DOMTree, *};
@@ -796,7 +805,7 @@ fn main() {
         0,
     );
     if rep.surprised || verbose {
-        println!("{}", report);
+        println!("{}", rep);
         println!("/correct");
     };
     let rep = quotient(
@@ -805,9 +814,9 @@ fn main() {
         "unfixed incorrect",
         0,
     );
-    if surprised || verbose {
-        println!("{}", report);
-        println!("/incorrect nofix");
+    if rep.surprised || verbose {
+        println!("{}", rep);
+        println!("/incorrect unfixed");
     };
     let rep = quotient(
         same_reg(InstQuantifier::all().into_iter()),
@@ -815,9 +824,9 @@ fn main() {
         "fixed incorrect",
         0,
     );
-    if surprised || verbose {
-        println!("{}", report);
-        println!("/incorrect fix");
+    if rep.surprised || verbose {
+        println!("{}", rep);
+        println!("/incorrect fixed");
     };
 }
 
