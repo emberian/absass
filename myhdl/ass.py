@@ -495,6 +495,9 @@ class bitarray:
     def __repr__(self):
         return f'bitarray({self.bs!r})'
 
+    def __len__(self):
+        return len(self.bs) * 8
+
     def __getitem__(self, v):
         try:
             addr = int(v)
@@ -592,8 +595,9 @@ def cpu_test(w, _ignored=0):
 
     cpu_unit = traceSignals(cpu(addr, data_to_cpu, data_to_ram, mode, ready, valid, clk, halt, reset, debug_ready, debug_out, 2))
     try_convert(cpu_unit)
+    mem_data = open(os.environ.get("ASS_BIN", '../assembler/hello16.bin'), 'rb').read()
     mem = cpu_ram(
-            open(os.environ.get("ASS_BIN", '../assembler/hello16.bin'), 'rb').read(),
+            mem_data,
             addr, data_to_ram, data_to_cpu, mode, ready, valid,
             min((8, w))
     )
@@ -604,9 +608,13 @@ def cpu_test(w, _ignored=0):
         yield delay(1)
         reset.next = False
         debugging = bool(os.environ.get('ASS_DEBUG'))
+        debug_mem = bool(os.environ.get('ASS_MEM'))
         while cpu_unit.symdict['state'] != CPU_STAGE.HALT:
             if debugging:
                 print(f'{now()}:\t{"tick" if clk else "tock"}\t@{addr}/O={data_to_ram}/I={data_to_cpu}:{"W" if mode else "R"},{"V" if valid else " "}{"R" if ready else " "}\tnpc={cpu_unit.sigdict["npc"]}\tstate={cpu_unit.sigdict["state"]}\tinst={cpu_unit.sigdict["inst"]}/{cpu_unit.sigdict["bits_valid"]}\txf={cpu_unit.sigdict["xf"]},{cpu_unit.sigdict["xf_state"]}\n\tregs={" ".join(hex(i.val)[2:].rjust(4, "0") for i in cpu_unit.symdict["regs"])}')
+                if debug_mem:
+                    memstr = ' '.join(f'{i:02x}' for i in mem.symdict['bs'].bs)
+                    print(f'\tmem={memstr}')
             clk.next = not clk
             yield delay(1)
             if debug_ready:
