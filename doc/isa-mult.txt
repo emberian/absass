@@ -1,0 +1,20 @@
+Standard Long Instructions
+
+These instructions require 32 bits to represent,
+using the Long Instruction format.
+
+Instruction Packet:
+
+    0xF 0x1  A B
+    0x0  op  H L
+
+The 0x0 is the "extension ID" and nonzero values are
+reserved for implementors to use freely.
+
+op:
+    0x0 Multiply
+        (H, L) = A * B
+
+    0x1 Divide
+        A = (H, L) / A
+        B = (H, Lo1) % B

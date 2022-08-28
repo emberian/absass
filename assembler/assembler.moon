@@ -92,6 +92,7 @@ class Assembler
 		JAL: 0x9000
 		SR: 0xa000
 		SMALLI: 0xc000
+		SWAP: 0xe000
 
 	@ARITH:
 		ADD: 0
@@ -99,9 +100,9 @@ class Assembler
 		SHL: 2
 		SHR: 3
 		ASR: 4
-		MUL: 5
-		DIV: 6
-		MOD: 7
+		ROL: 5
+		ROR: 6
+		NEG: 7
 
 	@LOGIC:
 		AND: 8
@@ -152,9 +153,9 @@ class Assembler
 		@emit_byte (@@OPCODE.COND | ((cmp&0xf)<<8)) >> 8
 		@emit_maybe_byte offset
 
-	e_jal: (data) =>
-		{:prog, :link} = data
-		@emit (@@OPCODE.JAL | ((prog&0xf)<<4) | (link&0xf))
+	e_swap: (data) =>
+	    {:a, :b} = data
+		@emit_byte (@@OPCODE.SWAP | a << 4 | b)
 
 	e_xfer: (data) =>
 		{:src, :dst} = data
@@ -646,18 +647,18 @@ class Assembler
 				offset: off.val
 		}, s
 
-	DECL_INSN "JAL", (s) =>
-		link = @p_reg s
-		return @die "expected link reg", s unless link
+	DECL_INSN "SWAP", (s) =>
+		a = @p_reg s
+		return @die "expected a reg", s unless a
 		s = @trim @optcomma link.rest
-		prog = @p_reg s
-		return @die "expected prog reg", s unless prog
+		b = @p_reg s
+		return @die "expected b reg", s unless b
 		s = @trim @optcomma prog.rest
 		@ok {
-			insn: "jal"
+			insn: "swap"
 			data:
-				link: link.val
-				prog: prog.val
+				a: a.val
+				b: b.val
 		}, s
 
 	charif = (b, ch) ->
@@ -699,7 +700,7 @@ class Assembler
 
 	DECL_EMIT "jc", (ins) => @e_jc ins.data
 
-	DECL_EMIT "jal", (ins) => @e_jal ins.data
+	DECL_EMIT "swap", (ins) => @e_swap ins.data
 
 	DECL_EMIT "xfer", (ins) =>
 		@e_xfer ins.data

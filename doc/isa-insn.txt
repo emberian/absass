@@ -60,11 +60,11 @@ Ranges of [a:b] are inclusive of both endpoints (forgive me).
 			12: T	13: NEQ	14: LT	15: LTE
 
 - I[15:14] == 0b01    ( DATA TRANSFER INSTRUCTIONS )
-    - I[3:0]: (D) Destination Register, LHS (0-15)
-    - I[7:4]: (S) Source Register, RHS (0-15)
-    - I[10]: (Dm) Destination indirect
-    - I[9:8]: (Da) Destination increment mode
-    - I[13]: (Sm) Source indirect
+    - I[3:0]:   (D) Destination Register, LHS (0-15)
+    - I[7:4]:   (S) Source Register, RHS (0-15)
+    - I[10]:    (Dm) Destination indirect
+    - I[9:8]:   (Da) Destination increment mode
+    - I[13]:    (Sm) Source indirect
     - I[12:11]: (Sa) Source increment mode
 
 The _indirect bit_, if set, uses the register contents as a memory address and generates the appropriate load/store behavior.
@@ -77,25 +77,22 @@ The _increment mode_ is a two bit value interpreted as:
     - 0b11 - autopostdecrement: decrement the value of the register by $WORDBYTES after the memory operation
 
 - I[15:12] == 0b1000	( CONDITIONAL INSTRUCTIONS )
-	- I[7:0]: (S) *Signed* Offset (in *Instructions*)
+	- I[7:0]:  (S) *Signed* Offset (in *Instructions*)
 	- I[11:8]: (C) Comparison Register (0-15)
 		- Condition is passed if reg is nonzero
 
-- I[15:11] == 0b10010	( JUMP AND LINK )
-	- I[3:0]: (L) Link Register (written, next PC) (0-15)
-	- I[7:4]: (P) Program Register (read, new PC) (0-15)
-	- I[10:8]: Reserved
-
-- I[15:11] == 0b10011  ( SUBWORD OPERATIONS  )
+- I[15:11] == 0b1001  ( SUBWORD OPERATIONS  )
 	- I[3:0]:  (D) Destination Register (0-15)
 	- I[7:4]:  (Swi) Subword Index Register (0-15)
+	- I[11]:   (Sex) Sign Extend
 	- I[10:8]: (Sws) Subword Size (0-7)
 
 	When Sws == 0, size is considered to be 8.
 
 	Equivalent to the following sequence of code,
 	which moves the Sws bytes starting at the
-	Swith byte from the most insignificant byte.
+	Swith byte from the most insignificant byte
+	and sign extends the result if bit 11 is set.
 
 	#if (Sws == 0)
 	#define Sws 8
@@ -106,12 +103,22 @@ The _increment mode_ is a two bit value interpreted as:
 	SI T1, 1
 	SHL T1, T0
 	SUB T1, 1
-	MUL Swi, 8
 	SI T0, 8*Swi
 	SHL T1, T0
-	# T1 = ((1<<(Sws * 8)) - 1) << (8*Swi)
 	AND D, T1
 	SHR D, T0
+	SHR T1, T0
+	NOT T1
+	ADD T1, 1
+	ROL T1, 1
+	MOV T0, T1
+	AND T0, D
+	ADD T0, Sex
+	JNZ T0, .signset
+	ADD PC, .end-$
+.signset:
+    OR D, T1
+.end:
 	XF T1, *SP+
 	XF T0, *SP+
 
@@ -178,12 +185,81 @@ The _increment mode_ is a two bit value interpreted as:
 			-S 192-255: Reserved for Vendor Extensions
 
 - I[15:12] == 0b1100 ( SMALL IMMEDIATE )
-    - I[3:0]: (D) Destination Register
-	- I[12:4]: (I) Immediate Value
+    - I[3:0]:  (D) Destination Register
+	- I[11:4]: (I) Immediate Value
 	Stores the value in the register.
 
-- I[15:12] == 0b1101 (RESERVED)
+- I[15:12] == 0b1101 ( SELECT REGISTER )
+	- I[3:0]:  (Z) Zero Register
+	- I[7:4]:  (N) Nonzero Register
+	- I[11:8]: (C) Condition Register
+	Replace the condition register according to its value.
 
-- I[15:12] == 0b1110 (RESERVED)
+- I[15:12] == 0b1110 ( MISCELLANEOUS FUNCTIONALITY )
+	- I[3:0]: (A) First Register
+	- I[7:4]: (B) Second Register
 
-- I[15:12] == 0b1111 (LONG INSTRUCTION)
+	- I[11:8] == 0b0000 ( SWAP REGISTERS )
+		A = B
+		B = A
+
+	- I[11:8] == 0b0001 ( MULTIPLY )
+		A *= B
+
+	- I[11:8] == 0b0010 ( DIVIDE )
+		A /= B
+
+	- I[11:8] == 0b0011 ( MODULUS )
+		A %= B
+
+	- I[11:8] == 0b0100 ( LOAD REG )
+		A = regs[B]
+
+	- I[11:8] == 0b0101 ( STORE REG )
+		regs[B] = A
+
+	- I[11:8] == 0b0110 ( LOAD OFFSET )
+		A = *(A + imm(B)*$WORDBYTES)
+
+	- I[11:8] == 0b0111 ( LOOP )
+		A -= 1
+		if A != 0 { PC += imm(B)*$IWORDBYTES }
+
+	- I[11:8] == 0b0111 ( LOOP INDIRECT )
+		A -= 1
+		if A != 0 { PC += B }
+
+	- I[11:8] == 0b1000 ( JZ )
+		if A == 0 { PC += imm(B)*$IWORDBYTES }
+
+	- I[11:8] == 0b1001 ( JZ INDIRECT )
+		if A == 0 { PC += B }
+
+	- I[11:8] == 0b1010 ( JNZ )
+		if A != 0 { PC += imm(B)*$IWORDBYTES }
+
+	- I[11:8] == 0b1011 ( JNZ INDIRECT )
+		if A != 0 { PC += B }
+
+	- I[11:8] == 0b1100 ( JGZ )
+		if signed(A) > 0 { PC += imm(B)*$IWORDBYTES }
+
+	- I[11:8] == 0b1101 ( JGZ INDIRECT )
+		if signed(A) > 0 { PC += B }
+
+	- I[11:8] == 0b1110 ( JLZ )
+		if signed(A) < 0 { PC += imm(B)*$IWORDBYTES }
+
+	- I[11:8] == 0b1111 ( JLZ INDIRECT )
+		if signed(A) < 0 { PC += B }
+
+
+- I[15:12] == 0b1111 ( LONG INSTRUCTION )
+
+	Instructions starting with this nibble are reserved for extensions
+	that use more than 16 bits of space for instructions. The encoded
+	length preserves the ability of tools which do not understand any
+	particular extensions to still understand the delineation points
+	of the instruction stream.
+
+	- I[11:8]: (L) Number of iwords to follow.
