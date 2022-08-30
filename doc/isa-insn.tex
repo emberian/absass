@@ -229,7 +229,7 @@ to \reg{PC} if \code{S} is clear, otherwise multiply the number encoded as \reg{
 		&4&&LoadReg&$$A = regs[B]$$&&&\cr
 		&5&&StoreReg&$$regs[B] = A$$&&&\cr
 		&6&&Loop&$$A -= 1, if A != 0 { PC += B }$$&&&\cr
-		&7&&Loop&$$A -= 1, if A != 0 { PC += imm(B) * 2 }$$&&&\cr
+		&7&&Loop Indirect&$$A -= 1, if A != 0 { PC += imm(B) * 2 }$$&&&\cr
 		height2pt&\omit&&\omit&&\omit&\cr
 		\noalign{\hrule}
 	}
