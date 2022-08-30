@@ -8,7 +8,7 @@
 
 \chapter{ASS16}
 
-The following is the encoding of ASS16, a 16-bit instruction-word ISA. Values
+The following is the encoding of ASS16, a 16-bit instruction-symbol ISA. Values
 are given in their natural (big-endian) representation, such that in
 \code{0xABCD}, \code{A} is the most significant digit.
 
@@ -51,6 +51,8 @@ done per-instantiation, and care has generally been taken to ensure that
 instruction codings do not vary with word size. For a given instantiation, the
 device is specified as ``ASS16/W'', where W is the word size---for example,
 ``ASS16/32'' would be a 32-bit bus, 16-bit instruction ASS CPU.
+
+\vfil \break
 
 \section{Distinguished Exception Generator}
 
@@ -128,17 +130,14 @@ number, and that register's value is to be used as \reg{S}.
 		&2&&Shl ($D = D << S$, fill $0$)&&&\cr
 		&3&&Shr ($D = D >> S$, fill $0$)&&&\cr
 		&4&&Asr ($D = D >> S$, fill MSB of $D$)&&&\cr
-		&5&&Mul ($D = D * S$)&&*&\cr
-		&6&&Div ($D = D / S$, integer part)&&*&\cr
-		&7&&Mod ($D = D \% S$)&&*&\cr
+		&5&&Rol ($D = D rol S$, rotate left)&&&\cr
+		&6&&Ror ($D = D ror S$, rotate right)&&&\cr
+		&7&&Neg ($D = - S$, signed negation)&&&\cr
 		height2pt&\omit&&\omit&&\omit&\cr
 		\noalign{\hrule}
 	}
 }
 \bigskip
-
-Entries marked with ``*'' are available only on models with a hardware
-multiplier (see \reg{SR 7}).
 
 \section{Comparison Instructions}
 
@@ -178,7 +177,7 @@ The resulting table of operations, with some redundancy, is as follows, with
 }
 \bigskip
 
-\section{Conditional Instructions}
+\section{Medium-range Jump Not Zero}
 
 \noindent\ins\rg 16,12. \code{== 0b1000}
 
@@ -189,31 +188,70 @@ If the value of \reg{C} is nonzero, \reg{PC} is offset by \code{S} from the
 {\it next} instruction. The value of \code{S} is interpreted to be in {\it
 instruction words} (typically 2 bytes for ASS16).
 
-\section{Jump and Link}
+\section{Short-range Branches}
 
-\noindent\ins\rg 16,11. \code{== 0b10010}
+\noindent\ins\rg 16,11. \code{== 0b11101}
 
-\li \ins\rg 4,0. (\reg{L}) Link Register (written, next \reg{PC}) (0--15)
-\li \ins\rg 8,4. (\reg{P}) Program Register (read, new \reg{PC})) (0--15)
-\li \ins\rg 11,8. Reserved
+\li \ins\rg 4,0. (\reg{V}) Value Register
+\li \ins\rg 8,4. (\reg{C}) Jump Offset
+\li \ins\ix{8}. (\code{S}) Immediate Flag
+\li \ins\ix{9}. (\code{I)} Invert Flag
+\li \ins\ix{10}. (\code{G}) Greater Flag
 
-Using the \reg{PC} of the next instruction, assign \reg{L} to \reg{PC}, then
-assign \reg{PC} to \reg{P}. This implements a rudimentary ``CALL'' instruction;
-for suggestions on implementing a calling convention, see the separate
-document (which, for example, prescribes \reg{R3} as the typical Link
-Register).
+Compare the \reg{V} register with zero. If the greater flag is set, perform a signed
+magnitude comparison. If the greater flag is clear, perform an equality test. The final
+outcome is inverted if \code{I} is set. If the outcome is true, add the \reg{V} register
+to \reg{PC} if \code{S} is clear, otherwise multiply the number encoded as \reg{V} by
+2 and add it to \reg{PC}.
+
+\section{Miscellaneous Two-register Functionality}
+
+\noindent\ins\rg 16,11. \code{== 0b11100}
+
+\li \ins\rg 4,0. (\reg{A}) Second Register (0--15)
+\li \ins\rg 8,4. (\reg{B}) Second Register (0--15)
+\li \ins\rg 11,8. (\code{M}) Operation Number (0--7)
+
+\bigskip
+{
+	\offinterlineskip
+	\halign{&\vrule#&\strut\quad#\hfil\quad\cr
+		\noalign{\hrule}
+		height2pt&\omit&&\omit&&\omit&\cr
+		&{\bf Mode}&&{\bf Operation}&&{\bf Note}&\cr
+		height2pt&\omit&&\omit&&\omit&\cr
+		\noalign{\hrule}
+		height2pt&\omit&&\omit&&\omit&\cr
+		&0&&Swap&$$A = B, B = A$$&&&\cr
+		&1&&Mul&$$A = A * B$$&&*&\cr
+		&2&&Div&$$A = A / B$$, fractional part&&*&\cr
+		&3&&Mod&$$A = A \% B$$, integer part&&*&\cr
+		&4&&LoadReg&$$A = regs[B]$$&&&\cr
+		&5&&StoreReg&$$regs[B] = A$$&&&\cr
+		&6&&Loop&$$A -= 1, if A != 0 { PC += B }$$&&&\cr
+		&7&&Loop&$$A -= 1, if A != 0 { PC += imm(B) * 2 }$$&&&\cr
+		height2pt&\omit&&\omit&&\omit&\cr
+		\noalign{\hrule}
+	}
+}
+\bigskip
+
+Entries marked with ``*'' are available only on models with a hardware
+multiplier (see \reg{SR 7}).
 
 \section{Subword Operation}
 
-\noindent\ins\rg 16,11. \code{== 0b10011}
+\noindent\ins\rg 16,12. \code{== 0b1001}
 
 \li \ins\rg 4,0. (\reg{D}) Destination Register (0--15)
 \li \ins\rg 8,4. (\code{Bi}) Byte Index (0--15)
 \li \ins\rg 11,8. (\code{B}) Bytes (0--7)
+\li \ins\ix {11}. (\code{S}) Sign Extend Flag
 
 Selects bytes out of a word-sized register. The lowest-order byte accessed in
 \reg{D} is \code{Bi}, and \code{B} bytes are accessed from it, shifted right by
-\code{Bi}. If $B = 0$, 8 bytes are selected instead.
+\code{Bi}. If $B = 0$, 8 bytes are selected instead. If \code{S} is set, the
+result is sign-extended using the highest bit of the selected subword.
 
 This is approximately equivalent to the following assembly, with \code{B} in
 \reg{A0} and \code{Bi} in \reg{A1}:
@@ -339,7 +377,7 @@ to the hardware. The defined ones are as follows:
 			debugging interface.
 		}&\cr
 		\trule{2pt}
-		&192 -- 255&&-&&Vendor Extensions&&Reserved for vendors.&\cr
+		&64 -- 255&&-&&Extensions&&Reserved for extenders.&\cr
 		\tspace{2pt}
 		\noalign{\hrule}
 	}
@@ -384,5 +422,49 @@ The operations, in order, are a load from \reg{S} (which may be indirect), and
 a store to \reg{D} (which also may be indirect). It is possible to use any of
 the modes with non-indirect access, which (for example) may be used to
 implement counting loops.
+
+\section{Long Instructions}
+
+\noindent\ins\rg 16,12. \code{== 0b1111}
+
+\li \ins\rg 12,8. (\code{L}) Number of instruction symbols to follow
+
+Instructions starting with this nibble are reserved for extensions that use more than
+16 bits of space for their encodings. The encoded length preserves the ability
+for disassemblers, linkers, and soforth to operate around their presence structurally
+if not necessarily semantically. Currently, a 32-bit format is used, with other
+lengths freely available. Ultra long instruction words longer than 15*16 bits should
+include as many "long instruction" header packets in their coding as necessary.
+
+\subsection{32-bit Format}
+
+\li \ins\rg 32,28. \code{== 0b1111}
+\li \ins\rg 28,24. \code{== 0x1} (One additional 16-bit symbol to follow)
+\li \ins\rg 24,20. (\code{A}) Input Register
+\li \ins\rg 20,16. (\code{B}) Input Register
+\li \ins\rg 16,12. (\code{E}) \code{== 0x0} (Extension ID)
+\li \ins\rg 12,8. (\code{F}) Operation Number (0--1)
+\li \ins\rg 8,4. (\code{H}) Output Register, Hi Word
+\li \ins\rg 4,0. (\code{L}) Output Register, Lo Word
+
+The \code{E} field, when nonzero, is reserved for extenders.
+
+\bigskip
+{
+	\offinterlineskip
+	\halign{&\vrule#&\strut\quad#\hfil\quad\cr
+		\noalign{\hrule}
+		height2pt&\omit&&\omit&&\omit&\cr
+		&{\bf Mode}&&{\bf Operation}&&{\bf Note}&\cr
+		height2pt&\omit&&\omit&&\omit&\cr
+		\noalign{\hrule}
+		height2pt&\omit&&\omit&&\omit&\cr
+		&0&&Multiply ($(H, L) = A * B)$)&&&\cr
+		&1&&Divmod ($A + (H, L) / A, B = (H, L) \% B$)&&&\cr
+		height2pt&\omit&&\omit&&\omit&\cr
+		\noalign{\hrule}
+	}
+}
+\bigskip
 
 \maybye

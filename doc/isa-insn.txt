@@ -37,11 +37,9 @@ Ranges of [a:b] are inclusive of both endpoints (forgive me).
 		- 2: Shl (D = D << S, fill 0)
 		- 3: Shr (D = D >> S, fill 0)
 		- 4: Asr (D = D >> S, fill sign)
-		- 5: Mul (D = D * S) *
-		- 6: Div (D = D / S) *
-		- 7: Mod (D = D % S) *
-		Instructions marked (*) are available only on models with a hardware
-		multiplier (see SR 7).
+		- 5: Rol (D = D rotate left S)
+		- 6: Ror (D = D rotate right S)
+		- 7: Neg (D = - S)
 
 	If Si is set, then S is taken to be the value to be used for the operation.
 	Otherwise, S is a register number.
@@ -203,14 +201,17 @@ The _increment mode_ is a two bit value interpreted as:
 		A = B
 		B = A
 
-	- I[11:8] == 0b0001 ( MULTIPLY )
+	- I[11:8] == 0b0001 ( MULTIPLY ) *
 		A *= B
 
-	- I[11:8] == 0b0010 ( DIVIDE )
+	- I[11:8] == 0b0010 ( DIVIDE ) *
 		A /= B
 
-	- I[11:8] == 0b0011 ( MODULUS )
+	- I[11:8] == 0b0011 ( MODULUS ) *
 		A %= B
+
+	Instructions marked (*) are available only on models with a hardware
+	multiplier (see SR 7).
 
 	- I[11:8] == 0b0100 ( LOAD REG )
 		A = regs[B]
