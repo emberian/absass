@@ -21,7 +21,7 @@ pub fn main() {
             while let Ok(2) = i.read(&mut insn_buf) {
                 println!(
                     "{}",
-                    Insn::decode((insn_buf[0] as u16) << 8 | insn_buf[1] as u16)
+                    Insn::<u8>::decode((insn_buf[0] as u16) << 8 | insn_buf[1] as u16)
                 );
             }
         }
@@ -30,7 +30,7 @@ pub fn main() {
                 let l = l.unwrap();
                 let l = l.trim_start_matches("0x");
 
-                let iv = Insn::decode(u16::from_str_radix(l, 16).unwrap());
+                let iv = Insn::<u8>::decode(u16::from_str_radix(l, 16).unwrap());
                 println!("{:?}", iv);
             }
         }
@@ -86,7 +86,7 @@ pub fn main() {
                     if insn != 0 && insn % 256 == 0 {
                         println!("</tr></tr>")
                     }
-                    let ins = Insn::decode(insn);
+                    let ins = Insn::<u8>::decode(insn);
                     match ins.brief() {
                         None => println!("<td></td><!--{:04x}-->", insn),
                         Some(b) => println!("<td class=\"valid\">{}</td><!--{:04x}-->", b, insn),
@@ -99,7 +99,7 @@ pub fn main() {
                 println!("256 256 255");
                 let mut l = (0, 0, 0);
                 for insn in 0..=std::u16::MAX {
-                    let insn = Insn::decode(insn);
+                    let insn = Insn::<u8>::decode(insn);
                     let col = insn.color();
                     if col != l {
                         l = col;
@@ -116,10 +116,10 @@ pub fn main() {
             }
         },
         Some("unused") => {
-            let all = (0..u16::MAX).map(|i| Insn::decode(i)).collect::<Vec<_>>();
+            let all = (0..u16::MAX).map(|i| Insn::<u8>::decode(i)).collect::<Vec<_>>();
             let mut all_used = all.iter().map(|i| i.encode()).collect::<Vec<_>>();
             for i in 0..u16::MAX {
-                let f = Insn::decode(i);
+                let f = Insn::<u8>::decode(i);
                 let fenc = f.encode();
                 if let Insn::NotSure { .. } = f {
                     continue;
@@ -147,7 +147,7 @@ pub fn main() {
                         last,
                         last - first,
                         (first ..=last).fold(0xffff, <u16 as std::ops::BitAnd>::bitand),
-                        Insn::decode(last + 1)
+                        Insn::<u8>::decode(last + 1)
                     );
 
                     first = last;

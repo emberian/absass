@@ -462,7 +462,7 @@ struct Instance {
     s_mode: MoveMode,
 }
 impl Instance {
-    fn to_inst(self) -> assrs::Insn {
+    fn to_inst(self) -> assrs::Insn<u8> {
         let Instance {
             src,
             dst,
@@ -473,8 +473,8 @@ impl Instance {
         } = self;
 
         assrs::Insn::Move {
-            src,
-            dst,
+            src: src as u8,
+            dst: dst as u8,
             s_mode,
             s_deref,
             d_mode,

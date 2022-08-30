@@ -2,7 +2,7 @@ use comfy_table::Table;
 
 use crate::isa::*;
 
-use std::io::Write;
+use std::{io::Write, mem::size_of};
 
 pub struct Machine {
     pub regs: [Word; 16],
@@ -55,7 +55,6 @@ pub enum StepOut {
 pub enum ExcCause {
     DistinguishedExceptionGenerator,
     DivZero,
-
 }
 impl Machine {
     pub const FREQ: Word = 0xa55;
@@ -72,14 +71,16 @@ impl Machine {
         todo!()
     }
 
-    pub fn exec(&mut self, i: Insn) -> StepOut {
+    pub fn exec(&mut self, i: Insn<usize>) -> StepOut {
         use StepOut::*;
         #[cfg(debug_assertions)]
         println!("exec {}", i);
 
         let mut pc = self.pc() + 2;
         match i {
-            Insn::DistinguishedExceptionGenerator => self.handle_exc(ExcCause::DistinguishedExceptionGenerator),
+            Insn::DistinguishedExceptionGenerator => {
+                self.handle_exc(ExcCause::DistinguishedExceptionGenerator)
+            }
             Insn::Logic { src, dst, op } => {
                 let mut res: Word = 0;
                 for i in 0..(WORDSZ * 8) {
@@ -98,9 +99,9 @@ impl Machine {
                     ArithOp::Shl => self.regs[dst] << src,
                     ArithOp::Shr => self.regs[dst] >> src,
                     ArithOp::Asr => ((self.regs[dst] as i64) >> src) as Word,
-                    ArithOp::Mul => self.regs[dst].wrapping_mul(src),
-                    ArithOp::Div => self.regs[dst] / src,
-                    ArithOp::Mod => self.regs[dst] % src,
+                    ArithOp::Rol => self.regs[dst].rotate_left(src as u32),
+                    ArithOp::Ror => self.regs[dst].rotate_right(src as u32),
+                    ArithOp::Neg => (-(src as isize)) as Word,
                 };
             }
             Insn::Compare {
@@ -184,20 +185,70 @@ impl Machine {
                 self.insns += 1;
                 return Continue;
             }
-            Insn::JumpLink { link, prog } => {
-                self.regs[link] = pc as Word;
-                pc = self.regs[prog] as usize;
-            }
-            Insn::JumpCond { offset, cond } => {
+            Insn::Misc { a, b, op } => match op {
+                MiscOp::Swap => {
+                    self.regs[a] = self.regs[b];
+                }
+                MiscOp::Mul => {
+                    self.regs[a] = self.regs[a].wrapping_mul(self.regs[b]);
+                }
+                MiscOp::Div => {
+                    self.regs[a] = self.regs[a] / self.regs[b];
+                }
+                MiscOp::Mod => {
+                    self.regs[a] = self.regs[a] % self.regs[b];
+                }
+                MiscOp::LoadR => {
+                    self.regs[a] = self.regs[self.regs[b] as usize];
+                }
+                MiscOp::StoreR => {
+                    self.regs[self.regs[b] as usize] = self.regs[a];
+                }
+                MiscOp::Loop => todo!(),
+                MiscOp::LoopI => todo!(),
+            },
+            Insn::ShortBranch {
+                cond,
+                imm,
+                val,
+                inv,
+                gt,
+            } => {
+                let c = self.regs[cond];
+                let br = if gt {
+                    if inv { (c as IWord) < 0 } else  { (c as IWord) < 0 }
+                } else {
+                    if inv { c != 0 } else { c == 0 }
+                };
+                if br { 
+                    if imm {
+                        self.regs[cond].wrapping_add(val as Word * 2);
+                    } else {
+                        self.regs[cond].wrapping_add(self.regs[val] * 2);
+                    }
+                }
+            },
+            Insn::JumpNZ { offset, cond } => {
                 if self.regs[cond] != 0 {
                     pc = pc.checked_add_signed(offset as isize).unwrap();
                 }
             }
-            Insn::SubWord { dst, index, bytes } => {
+            Insn::SubWord {
+                dst,
+                index,
+                bytes,
+                sign_extend,
+            } => {
                 let b = if bytes == 0 { 8 } else { bytes };
                 let m = (1 << (8 * b)) - 1;
                 let s = 8 * index;
-                self.regs[dst] = (self.regs[dst] & (m << s)) >> s;
+                let subres = (self.regs[dst] & (m << s)) >> s;
+                self.regs[dst] = if sign_extend {
+                    let bits_left = (size_of::<isize>() * 8 - 8 * (b as usize));
+                    (((subres << bits_left) as isize) >> bits_left) as Word
+                } else {
+                    subres
+                };
             }
             Insn::SysReg { write, reg, sr } => match sr {
                 0 => {

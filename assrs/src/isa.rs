@@ -25,6 +25,7 @@ impl MoveMode {
 }
 pub type Reg = usize; // ruuuuust
 pub type Word = u16;
+pub type IWord = i16;
 pub const WORDSZ: Word = 2;
 
 #[derive(Debug, Hash, Clone, Copy)]
@@ -34,9 +35,9 @@ pub enum ArithOp {
     Shl,
     Shr,
     Asr,
-    Mul,
-    Div,
-    Mod,
+    Rol,
+    Ror,
+    Neg,
 }
 impl ArithOp {
     pub fn from_u8(val: u8) -> ArithOp {
@@ -46,9 +47,9 @@ impl ArithOp {
             2 => ArithOp::Shl,
             3 => ArithOp::Shr,
             4 => ArithOp::Asr,
-            5 => ArithOp::Mul,
-            6 => ArithOp::Div,
-            7 => ArithOp::Mod,
+            5 => ArithOp::Rol,
+            6 => ArithOp::Ror,
+            7 => ArithOp::Neg,
             _ => panic!("invalid arith op"),
         }
     }
@@ -61,14 +62,14 @@ impl ArithOp {
             Shl => "SHL",
             Shr => "SHR",
             Asr => "ASR",
-            Mul => "MUL",
-            Div => "DIV",
-            Mod => "MOD",
+            Rol => "ROL",
+            Ror => "ROR",
+            Neg => "NEG",
         }
     }
 }
 #[derive(Debug, Hash, Clone, Copy)]
-pub enum Insn {
+pub enum Insn<Reg> {
     DistinguishedExceptionGenerator,
     Logic {
         src: Reg,
@@ -97,11 +98,19 @@ pub enum Insn {
         d_mode: MoveMode,
         d_deref: bool,
     },
-    JumpLink {
-        prog: Reg,
-        link: Reg,
+    Misc {
+        op: MiscOp,
+        a: Reg,
+        b: Reg,
     },
-    JumpCond {
+    ShortBranch {
+        cond: Reg,
+        imm: bool,
+        val: Reg,
+        inv: bool,
+        gt: bool,
+    },
+    JumpNZ {
         offset: i8,
         cond: Reg,
     },
@@ -109,6 +118,7 @@ pub enum Insn {
         dst: Reg,
         index: u8,
         bytes: u8,
+        sign_extend: bool,
     },
     SysReg {
         write: bool,
@@ -124,21 +134,77 @@ pub enum Insn {
     },
 }
 
-impl std::fmt::Display for Insn {
+pub trait RegEnc: std::fmt::Display+Copy {
+    fn reg(r: u16) -> Self;
+    fn imm(r: u16) -> Self;
+    fn enc(self) -> u16;
+}
+impl RegEnc for u8 {
+    fn reg(r: u16) -> Self {
+        r as Self
+    }
+    fn imm(r: u16) -> Self {
+        r as Self
+    }
+    fn enc(self) -> u16 {
+        self as u16
+    }
+}
+impl RegEnc for usize {
+    fn reg(r: u16) -> Self {
+        r as Self
+    }
+    fn imm(r: u16) -> Self {
+        r as Self
+    }
+    fn enc(self) -> u16 {
+        self as u16
+    }
+}
+
+
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy, enum_utils::IterVariants)]
+pub enum MiscOp {
+    Swap,
+    Mul,
+    Div,
+    Mod,
+    LoadR,
+    StoreR,
+    Loop,
+    LoopI,
+}
+
+impl<R: RegEnc> std::fmt::Display for Insn<R> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.to_asm())
     }
 }
-impl Insn {
+impl MiscOp {
+    fn brief(&self) -> &'static str {
+        use MiscOp::*;
+        match self {
+            Swap => "SWAP",
+            Mul => "MUL",
+            Div => "DIV",
+            Mod => "MOD",
+            LoadR => "LOADR",
+            StoreR => "STORER",
+            Loop => "LOOP",
+            LoopI => "LOOPI",
+        }
+    }
+}
+impl<R: RegEnc> Insn<R> {
     pub fn encode(&self) -> u16 {
         match self {
             Insn::DistinguishedExceptionGenerator => 0,
             Insn::Logic { src, dst, op } => {
-                *dst as u16 | ((*src as u16) << 4) | ((*op as u16) << 8) | (0x1 << 12)
+                dst.enc() | (src.enc() << 4) | ((*op as u16) << 8) | (0x1 << 12)
             }
             Insn::Arith { src, dst, si, op } => {
                 let si = if *si { 1 << 11 } else { 0 };
-                *dst as u16 | ((*src as u16) << 4) | ((*op as u16) << 8) | si | (0x2 << 12)
+                dst.enc() | (src.enc() << 4) | ((*op as u16) << 8) | si | (0x2 << 12)
             }
             Insn::Compare {
                 src,
@@ -148,8 +214,8 @@ impl Insn {
                 gt,
                 iv,
             } => {
-                *dst as u16
-                    | ((*src as u16) << 4)
+                dst.enc()
+                    | (src.enc() << 4)
                     | ((*eq as u16) << 8)
                     | ((*gt as u16) << 9)
                     | ((*sn as u16) << 10)
@@ -164,30 +230,52 @@ impl Insn {
                 d_mode,
                 d_deref,
             } => {
-                *dst as u16
-                | ((*src as u16) << 4)
-                    | (*d_deref as u16) << 10 
+                dst.enc()
+                    | (src.enc() << 4)
+                    | (*d_deref as u16) << 10
                     | ((*d_mode as u16) << 8)
-                    | (*s_deref as u16) << 13 
+                    | (*s_deref as u16) << 13
                     | ((*s_mode as u16) << 11)
                     | (0x4 << 12)
             }
-            Insn::JumpLink { prog, link } => *link as u16 | ((*prog as u16) << 4) | (0x9 << 12),
-            Insn::JumpCond { offset, cond } => {
-                (*offset as u8) as u16 | ((*cond as u16) << 8) | (0x8 << 12)
+            Insn::Misc { a, b, op } => a.enc() | b.enc() << 4 | (*op as u16) << 8 | (0xe << 12),
+            Insn::JumpNZ { offset, cond } => {
+                (*offset as u8) as u16 | (cond.enc() << 8) | (0x8 << 12)
             }
-            Insn::SubWord { dst, index, bytes } => {
-                *dst as u16 | ((*index as u16) << 4) | ((*bytes as u16) << 8) | (0x13 << 11)
+            Insn::SubWord {
+                dst,
+                index,
+                bytes,
+                sign_extend,
+            } => {
+                dst.enc()
+                    | ((*index as u16) << 4)
+                    | ((*bytes as u16) << 8)
+                    | ((*sign_extend as u16) << 11)
+                    | (0x9 << 12)
+            }
+            Insn::ShortBranch {
+                cond,
+                imm,
+                val,
+                inv,
+                gt,
+            } => {
+                cond.enc()
+                    | val.enc() << 4
+                    | (*imm as u16) << 8
+                    | (*inv as u16) << 9
+                    | (*gt as u16) << 10
             }
             Insn::SysReg { write, reg, sr } => {
-                (0xa << 12) | ((*write as u16) << 12) | ((*reg as u16) << 8) | (*sr as u16)
+                (0xa << 12) | ((*write as u16) << 12) | (reg.enc() << 8) | (*sr as u16)
             }
-            Insn::SmallImm { dst, val } => (0xc << 12) | ((*val as u16) << 4) | (*dst as u16),
+            Insn::SmallImm { dst, val } => (0xc << 12) | ((*val as u16) << 4) | (dst.enc()),
             Insn::NotSure { value } => *value,
         }
     }
 
-    pub fn decode(val: u16) -> Insn {
+    pub fn decode(val: u16) -> Insn<R> {
         match val & 0xf000 {
             0 if val == 0 => Insn::DistinguishedExceptionGenerator,
             0x1000 => {
@@ -195,8 +283,8 @@ impl Insn {
                 let dst = val & 0xf;
                 let op = (val & 0xf00) >> 8;
                 Insn::Logic {
-                    src: src as Reg,
-                    dst: dst as Reg,
+                    src: R::reg(src),
+                    dst: R::reg(dst),
                     op: op as u8,
                 }
             }
@@ -206,8 +294,8 @@ impl Insn {
                 let op = (val & 0x700) >> 8;
                 let si = val & 0x800;
                 Insn::Arith {
-                    src: src as Reg,
-                    dst: dst as Reg,
+                    src: R::reg(src),
+                    dst: R::reg(dst),
                     si: si != 0,
                     op: ArithOp::from_u8(op as u8),
                 }
@@ -220,8 +308,8 @@ impl Insn {
                 let sn = val & 0x400;
                 let iv = val & 0x800;
                 Insn::Compare {
-                    src: src as Reg,
-                    dst: dst as Reg,
+                    src: R::reg(src),
+                    dst: R::reg(dst),
                     eq: eq != 0,
                     sn: sn != 0,
                     gt: gt != 0,
@@ -236,8 +324,8 @@ impl Insn {
                 let s_mode = (val >> 11) & 0x3;
                 let s_deref = val >> 13 & 0x1;
                 Insn::Move {
-                    src: src as Reg,
-                    dst: dst as Reg,
+                    src: R::reg(src),
+                    dst: R::reg(dst),
                     s_mode: MoveMode::from_u8(s_mode as u8),
                     s_deref: s_deref != 0,
                     d_mode: MoveMode::from_u8(d_mode as u8),
@@ -247,38 +335,31 @@ impl Insn {
             0x8000 => {
                 let offset = (val & 0xff) as i8;
                 let cond = (val & 0xf00) >> 8;
-                Insn::JumpCond {
+                Insn::JumpNZ {
                     offset,
-                    cond: cond as Reg,
+                    cond: R::reg(cond),
                 }
             }
-            0x9000 => match val & 0x0800 {
-                0 => {
-                    let link = val & 0xf;
-                    let prog = (val & 0xf0) >> 4;
-                    Insn::JumpLink {
-                        prog: prog as Reg,
-                        link: link as Reg,
-                    }
+            0x9000 => {
+                let dst = val & 0xf;
+                let index = (val & 0xf0) >> 4;
+                let bytes = (val & 0x700) >> 8;
+                let sign_extend = (val & 0x800) != 0;
+                Insn::SubWord {
+                    dst: R::reg(dst),
+                    index: index as u8,
+                    bytes: bytes as u8,
+                    sign_extend,
                 }
-                _ => {
-                    let dst = val & 0xf;
-                    let index = (val & 0xf0) >> 4;
-                    let bytes = (val & 0x700) >> 8;
-                    Insn::SubWord {
-                        dst: dst as Reg,
-                        index: index as u8,
-                        bytes: bytes as u8,
-                    }
-                }
-            },
+            }
+
             0xa000..=0xb000 => {
                 let write = (val & 0x1000) >> 12;
                 let reg = (val & 0xf00) >> 8;
                 let sr = val & 0xff;
                 Insn::SysReg {
                     write: write != 0,
-                    reg: reg as Reg,
+                    reg: R::reg(reg),
                     sr: sr as u8,
                 }
             }
@@ -286,7 +367,7 @@ impl Insn {
                 let reg = val & 0xf;
                 let imm = (val & 0x0ff0) >> 4;
                 Insn::SmallImm {
-                    dst: reg as Reg,
+                    dst: R::reg(reg),
                     val: imm as u8,
                 }
             }
@@ -296,7 +377,7 @@ impl Insn {
 
     pub fn brief(&self) -> Option<&'static str> {
         match self {
-            Insn::DistinguishedExceptionGenerator => Some("Deg"),
+            Insn::DistinguishedExceptionGenerator => Some("EXC"),
             Insn::Logic { op, .. } => Some(match op {
                 0b0000 => "F",
                 0b0001 => "NOR",
@@ -336,11 +417,17 @@ impl Insn {
                 (true, true, true, true) => "CMP.LE",
             }),
             Insn::Move { .. } => Some("XF"),
-            Insn::JumpLink { .. } => Some("JL"),
-            Insn::JumpCond { .. } => Some("JC"),
+            Insn::JumpNZ { .. } => Some("JNZ"),
             Insn::SubWord { .. } => Some("SWO"),
+            Insn::ShortBranch { inv, gt, .. } => Some(match (inv, gt) {
+                (false, false) => "SBR.Z",
+                (true, false) => "SBR.NZ",
+                (false, true) => "SBR.GZ",
+                (true, true) => "SBR.LZ",
+            }),
             Insn::SysReg { .. } => Some("SR"),
             Insn::SmallImm { .. } => Some("SI"),
+            Insn::Misc { op, .. } => Some(op.brief()),
             Insn::NotSure { .. } => None,
         }
     }
@@ -359,6 +446,24 @@ impl Insn {
             Insn::Compare { src, dst, .. } => {
                 format!("{} R{}, R{}", self.brief().unwrap(), dst, src)
             }
+            Insn::ShortBranch {
+                cond,
+                imm,
+                val,
+                inv,
+                gt,
+            } => {
+                format!(
+                    "{} R{}, {}",
+                    self.brief().unwrap(),
+                    cond,
+                    if imm {
+                        val.enc().to_string()
+                    } else {
+                        format!("R{}", val)
+                    }
+                )
+            }
             Insn::Move {
                 src,
                 dst,
@@ -367,7 +472,7 @@ impl Insn {
                 d_mode,
                 d_deref,
             } => {
-                fn operand(r: usize, m: MoveMode) -> String {
+                fn operand(r: u16, m: MoveMode) -> String {
                     use MoveMode::*;
                     match m {
                         Decr => format!("--R{}", r),
@@ -379,15 +484,26 @@ impl Insn {
                 format!(
                     "XF {}{}, {}{}",
                     if d_deref { "*" } else { "" },
-                    operand(dst, d_mode),
+                    operand(dst.enc(), d_mode),
                     if s_deref { "*" } else { "" },
-                    operand(src, s_mode)
+                    operand(src.enc(), s_mode)
                 )
             }
-            Insn::JumpLink { prog, link } => format!("JAL R{}, R{}", prog, link),
-            Insn::JumpCond { cond, offset } => format!("JC R{}, {}", cond, offset),
-            Insn::SubWord { dst, index, bytes } => {
-                format!("SWO R{}[{}..{}]", dst, index, index + bytes)
+            Insn::Misc { a, b, op } => format!("{} R{}, R{}", op.brief(), a, b),
+            Insn::JumpNZ { cond, offset } => format!("JNZ R{}, {}", cond, offset),
+            Insn::SubWord {
+                dst,
+                index,
+                bytes,
+                sign_extend,
+            } => {
+                format!(
+                    "SWO{} R{}[{}..{}]",
+                    if sign_extend { ".X" } else { "" },
+                    dst,
+                    index,
+                    index + bytes
+                )
             }
             Insn::SysReg { write, reg, sr } => {
                 if write {
@@ -414,8 +530,9 @@ impl Insn {
             Insn::Arith { .. } => (255, 255, 0),
             Insn::Compare { .. } => (0, 255, 0),
             Insn::Move { .. } => (0, 0, 0),
-            Insn::JumpLink { .. } => (127, 0, 0),
-            Insn::JumpCond { .. } => (127, 127, 0),
+            Insn::Misc { .. } => (127, 0, 0),
+            Insn::ShortBranch { .. } => (69, 69, 69),
+            Insn::JumpNZ { .. } => (127, 127, 0),
             Insn::SubWord { .. } => (127, 0, 127),
             Insn::SysReg { .. } => (255, 0, 255),
             Insn::SmallImm { .. } => (0, 255, 255),
