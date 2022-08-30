@@ -89,10 +89,10 @@ class Assembler
 		COMP: 0x3000
 		XFER: 0x4000
 		COND: 0x8000
-		JAL: 0x9000
+		MISC: 0xe000
+		SBR: 0xe800
 		SR: 0xa000
 		SMALLI: 0xc000
-		SWAP: 0xe000
 
 	@ARITH:
 		ADD: 0
@@ -111,6 +111,22 @@ class Assembler
 		NAND: 7
 		NOR: 1
 		XNOR: 9
+
+	@MISC:
+		SWAP: 0
+		MUL: 1
+		DIV: 2
+		MOD: 3
+		LOADR: 4
+		STORER: 5
+		LOOP: 6
+		LOOPI: 7
+
+	@SBR:
+		Z: 0
+		NZ: 1
+		GZ: 2
+		LZ: 3
 
 	e_logic: (data) =>
 		{:tbl, :src, :dst} = data
@@ -148,14 +164,22 @@ class Assembler
 			(dst&0xf)
 		)
 
-	e_jc: (data) =>
+	e_jnz: (data) =>
 		{:cmp, :offset} = data
 		@emit_byte (@@OPCODE.COND | ((cmp&0xf)<<8)) >> 8
 		@emit_maybe_byte offset
 
-	e_swap: (data) =>
-	    {:a, :b} = data
-		@emit_byte (@@OPCODE.SWAP | a << 4 | b)
+	e_misc: (data) =>
+	    {:a, :b, :op} = data
+		@emit_byte (@@OPCODE.MISC | op << 8 | a << 4 | b)
+
+	e_sbr: (data) =>
+		{:v,:c,:s,:op} = data
+		if s
+			s = 1
+		else
+			s = 0
+		@emit (@@OPCODE.SBR | op << 9 | s << 8 | c << 4 | v)
 
 	e_xfer: (data) =>
 		{:src, :dst} = data
@@ -543,6 +567,50 @@ class Assembler
 					dst: dst.val
 			}, s
 
+	for name, op in pairs @MISC
+		DECL_INSN name, (s) =>
+			dst = @p_reg s
+			return @die "expected A register", s unless dst
+			s = @trim @optcomma dst.rest
+			src = @p_reg s
+			return @die "expected B register", s unless src
+			s = @trim @optcomma src.rest
+			@ok {
+				insn: "misc"
+				data:
+					:op
+					src: src.val
+					dst: dst.val
+			}, s
+
+	for name, op in pairs @SBR
+		iname = "SBR." .. name
+		DECL_INSN iname, (s) =>
+			val = @p_reg s
+			return @die "expected Value register", s unless val
+			s = @trim @optcomma val.rest
+			if cond = @p_reg s
+				s = @trim @optcomma cond.rest
+				return @ok {
+					insn: "sbr"
+					data:
+						:op
+						s: false
+						c: cond.val
+						v: val.val
+				}, s
+			if condimm = @p_imm s
+				s = @trim @optcomma condimm.rest
+				return @ok {
+					insn: "sbr"
+					data:
+						:op
+						s: true
+						c: condimm.val
+						v: val.val
+				}, s
+			@die "expected offset register or immediate", s unless src
+
 	DECL_INSN "XF", (s) =>
 		dst = @p_xft s
 		return @die "expected dest transfer target", s unless dst
@@ -633,7 +701,7 @@ class Assembler
 				sr: sr.val
 		}, s
 
-	DECL_INSN "JC", (s) =>
+	DECL_INSN "JNZ", (s) =>
 		cmp = @p_reg s
 		return @die "expected comp reg", s unless cmp
 		s = @trim @optcomma cmp.rest
@@ -641,29 +709,18 @@ class Assembler
 		return @die "expected offset", s unless off
 		s = @trim @optcomma off.rest
 		@ok {
-			insn: "jc"
+			insn: "jnz"
 			data:
 				cmp: cmp.val
 				offset: off.val
 		}, s
 
-	DECL_INSN "SWAP", (s) =>
-		a = @p_reg s
-		return @die "expected a reg", s unless a
-		s = @trim @optcomma link.rest
-		b = @p_reg s
-		return @die "expected b reg", s unless b
-		s = @trim @optcomma prog.rest
-		@ok {
-			insn: "swap"
-			data:
-				a: a.val
-				b: b.val
-		}, s
-
 	charif = (b, ch) ->
 		return ch if b
 		""
+
+	charif2 = (b, ch1, ch2) ->
+		ch1 if b else ch2
 
 	for cmpcode = 0, 15
 		eq, gt, sn, iv = (cmpcode&1~=0), (cmpcode&2~=0), (cmpcode&4~=0), (cmpcode&8~=0)
@@ -698,9 +755,11 @@ class Assembler
 
 	DECL_EMIT "comp", (ins) => @e_comp ins.data
 
-	DECL_EMIT "jc", (ins) => @e_jc ins.data
+	DECL_EMIT "jnz", (ins) => @e_jnz ins.data
 
-	DECL_EMIT "swap", (ins) => @e_swap ins.data
+	DECL_EMIT "misc", (ins) => @e_misc ins.data
+
+	DECL_EMIT "sbr", (ins) => @e_sbr ins.data
 
 	DECL_EMIT "xfer", (ins) =>
 		@e_xfer ins.data
@@ -860,6 +919,8 @@ if arg
 	assembler\run source
 	assembler\info!
 	f = io.open arg[1], "wb"
-	f\write string.char b for b in *assembler.buf
+	for b in *assembler.buf
+		print b
+		f\write string.char b
 
 {:Assembler}
