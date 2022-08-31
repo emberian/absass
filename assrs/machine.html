@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+
+<html>
+
+<head>
+    <style>
+        pre {
+            line-height: 125%;
+        }
+
+        td.linenos .normal {
+            color: inherit;
+            background-color: transparent;
+            padding-left: 5px;
+            padding-right: 5px;
+        }
+
+        span.linenos {
+            color: inherit;
+            background-color: transparent;
+            padding-left: 5px;
+            padding-right: 5px;
+        }
+
+        td.linenos .special {
+            color: #000000;
+            background-color: #ffffc0;
+            padding-left: 5px;
+            padding-right: 5px;
+        }
+
+        span.linenos.special {
+            color: #000000;
+            background-color: #ffffc0;
+            padding-left: 5px;
+            padding-right: 5px;
+        }
+
+        .hll {
+            background-color: #ffffcc
+        }
+
+        .c {
+            color: #3D7B7B;
+            font-style: italic
+        }
+
+        /* Comment */
+        .err {
+            border: 1px solid #FF0000
+        }
+
+        /* Error */
+        .k {
+            color: #008000;
+            font-weight: bold
+        }
+
+        /* Keyword */
+        .o {
+            color: #666666
+        }
+
+        /* Operator */
+        .ch {
+            color: #3D7B7B;
+            font-style: italic
+        }
+
+        /* Comment.Hashbang */
+        .cm {
+            color: #3D7B7B;
+            font-style: italic
+        }
+
+        /* Comment.Multiline */
+        .cp {
+            color: #9C6500
+        }
+
+        /* Comment.Preproc */
+        .cpf {
+            color: #3D7B7B;
+            font-style: italic
+        }
+
+        /* Comment.PreprocFile */
+        .c1 {
+            color: #3D7B7B;
+            font-style: italic
+        }
+
+        /* Comment.Single */
+        .cs {
+            color: #3D7B7B;
+            font-style: italic
+        }
+
+        /* Comment.Special */
+        .gd {
+            color: #A00000
+        }
+
+        /* Generic.Deleted */
+        .ge {
+            font-style: italic
+        }
+
+        /* Generic.Emph */
+        .gr {
+            color: #E40000
+        }
+
+        /* Generic.Error */
+        .gh {
+            color: #000080;
+            font-weight: bold
+        }
+
+        /* Generic.Heading */
+        .gi {
+            color: #008400
+        }
+
+        /* Generic.Inserted */
+        .go {
+            color: #717171
+        }
+
+        /* Generic.Output */
+        .gp {
+            color: #000080;
+            font-weight: bold
+        }
+
+        /* Generic.Prompt */
+        .gs {
+            font-weight: bold
+        }
+
+        /* Generic.Strong */
+        .gu {
+            color: #800080;
+            font-weight: bold
+        }
+
+        /* Generic.Subheading */
+        .gt {
+            color: #0044DD
+        }
+
+        /* Generic.Traceback */
+        .kc {
+            color: #008000;
+            font-weight: bold
+        }
+
+        /* Keyword.Constant */
+        .kd {
+            color: #008000;
+            font-weight: bold
+        }
+
+        /* Keyword.Declaration */
+        .kn {
+            color: #008000;
+            font-weight: bold
+        }
+
+        /* Keyword.Namespace */
+        .kp {
+            color: #008000
+        }
+
+        /* Keyword.Pseudo */
+        .kr {
+            color: #008000;
+            font-weight: bold
+        }
+
+        /* Keyword.Reserved */
+        .kt {
+            color: #B00040
+        }
+
+        /* Keyword.Type */
+        .m {
+            color: #666666
+        }
+
+        /* Literal.Number */
+        .s {
+            color: #BA2121
+        }
+
+        /* Literal.String */
+        .na {
+            color: #687822
+        }
+
+        /* Name.Attribute */
+        .nb {
+            color: #008000
+        }
+
+        /* Name.Builtin */
+        .nc {
+            color: #0000FF;
+            font-weight: bold
+        }
+
+        /* Name.Class */
+        .no {
+            color: #880000
+        }
+
+        /* Name.Constant */
+        .nd {
+            color: #AA22FF
+        }
+
+        /* Name.Decorator */
+        .ni {
+            color: #717171;
+            font-weight: bold
+        }
+
+        /* Name.Entity */
+        .ne {
+            color: #CB3F38;
+            font-weight: bold
+        }
+
+        /* Name.Exception */
+        .nf {
+            color: #0000FF
+        }
+
+        /* Name.Function */
+        .nl {
+            color: #767600
+        }
+
+        /* Name.Label */
+        .nn {
+            color: #0000FF;
+            font-weight: bold
+        }
+
+        /* Name.Namespace */
+        .nt {
+            color: #008000;
+            font-weight: bold
+        }
+
+        /* Name.Tag */
+        .nv {
+            color: #19177C
+        }
+
+        /* Name.Variable */
+        .ow {
+            color: #AA22FF;
+            font-weight: bold
+        }
+
+        /* Operator.Word */
+        .w {
+            color: #bbbbbb
+        }
+
+        /* Text.Whitespace */
+        .mb {
+            color: #666666
+        }
+
+        /* Literal.Number.Bin */
+        .mf {
+            color: #666666
+        }
+
+        /* Literal.Number.Float */
+        .mh {
+            color: #666666
+        }
+
+        /* Literal.Number.Hex */
+        .mi {
+            color: #666666
+        }
+
+        /* Literal.Number.Integer */
+        .mo {
+            color: #666666
+        }
+
+        /* Literal.Number.Oct */
+        .sa {
+            color: #BA2121
+        }
+
+        /* Literal.String.Affix */
+        .sb {
+            color: #BA2121
+        }
+
+        /* Literal.String.Backtick */
+        .sc {
+            color: #BA2121
+        }
+
+        /* Literal.String.Char */
+        .dl {
+            color: #BA2121
+        }
+
+        /* Literal.String.Delimiter */
+        .sd {
+            color: #BA2121;
+            font-style: italic
+        }
+
+        /* Literal.String.Doc */
+        .s2 {
+            color: #BA2121
+        }
+
+        /* Literal.String.Double */
+        .se {
+            color: #AA5D1F;
+            font-weight: bold
+        }
+
+        /* Literal.String.Escape */
+        .sh {
+            color: #BA2121
+        }
+
+        /* Literal.String.Heredoc */
+        .si {
+            color: #A45A77;
+            font-weight: bold
+        }
+
+        /* Literal.String.Interpol */
+        .sx {
+            color: #008000
+        }
+
+        /* Literal.String.Other */
+        .sr {
+            color: #A45A77
+        }
+
+        /* Literal.String.Regex */
+        .s1 {
+            color: #BA2121
+        }
+
+        /* Literal.String.Single */
+        .ss {
+            color: #19177C
+        }
+
+        /* Literal.String.Symbol */
+        .bp {
+            color: #008000
+        }
+
+        /* Name.Builtin.Pseudo */
+        .fm {
+            color: #0000FF
+        }
+
+        /* Name.Function.Magic */
+        .vc {
+            color: #19177C
+        }
+
+        /* Name.Variable.Class */
+        .vg {
+            color: #19177C
+        }
+
+        /* Name.Variable.Global */
+        .vi {
+            color: #19177C
+        }
+
+        /* Name.Variable.Instance */
+        .vm {
+            color: #19177C
+        }
+
+        /* Name.Variable.Magic */
+        .il {
+            color: #666666
+        }
+
+        /* Literal.Number.Integer.Long */
+
+        #regview {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+        }
+
+        #memview {
+            display: grid;
+            grid-template-columns: repeat(16, 1fr);
+            gap: 10px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>ASS-16 Simulator Root Console</h1>
+
+    <div>
+        <span class="sectitle">Currently Assembled Program</span>
+        <div id="asmcode">
+        </div>
+
+        <div>
+            <span class="sectitle">Memory Contents</span>
+            <div id="memview"></div>
+        </div>
+
+        <div>
+            <span class="sectitle">Registers</span>
+            <div id="regview"></div>
+        </div>
+
+        <div id="cmdpanel">
+            <button>Reset</button>
+            <button>Halt</button>
+            <button>Step</button>
+            <button>Run</button>
+            <button>Refresh</button>
+        </div>
+
+        <div>
+            <span class="sectitle">Edit Assembly</span>
+            <textarea id="progtext"></textarea>
+            <button id="SetProg">Assemble and Upload</button>
+        </div>
+
+        <script>
+                let regs = [];
+                let mem = [];
+                let canPoll = true;
+
+                let latest = document.createElement("p");
+                let asslog = document.createElement("pre");
+
+                document.body.appendChild(latest);
+                document.body.appendChild(asslog);
+
+                (async function() {
+                var json = await doCmd("GetProg");
+                document.getElementById("asmcode").innerHTML = json.Text;
+                })()
+                
+                async function doPoll() {
+                    canPoll = false;
+                    let data = await doCmd("Poll");
+                    console.log("Poll:", data);
+                    if (data != "Halted") {
+                        if (data.Text !== undefined) {
+                            asslog.innerText += data.Text;
+                        }
+                        await doPoll();
+                    } else {
+                        
+                    }
+                    canPoll = true;
+                }
+                document.getElementById("SetProg").addEventListener("click", async function () {
+                    let progtext = document.getElementById("progtext").value;
+                    await doCmd({ "SetProgram": progtext }, true)
+                    var json = await doCmd("MemSize");
+                    growMem(json.MemSize);
+                    var json = await doCmd("GetProg");
+                    document.getElementById("asmcode").innerHTML = json.Text;
+                    refreshState();
+                });
+
+                async function doCmd(c, log) {
+                    let prog = await fetch("/avm", { method: 'POST', body: JSON.stringify(c), headers: { 'Content-Type': 'application/json' } });
+                    var json = await prog.json();
+                    if (log) {
+                        console.log(json);
+                        latest.innerText = JSON.stringify(json);
+                    } else {
+                        console.info(json);
+                    }
+                    return json;
+                }
+
+                async function refreshState() {
+                    var json = await doCmd("GetRegs");
+                    for (let i = 0; i < 16; i++) {
+                        regs[i].innerText = "R" + i + ": 0x" + json.Regs[i].toString(16);
+                    }
+                    var json = await doCmd("MemSize");
+                    growMem(json.MemSize);
+                    json = await doCmd({ GetMem: { addr: 0, size: mem.length } });
+                    for (let i = 0; i < json.MemContents.length; i++) {
+                        mem[i].innerText = "M" + i + ": 0x" + json.MemContents[i].toString(16);
+                    }
+                }
+
+                async function setReg(i, val) {
+                    const resp = await fetch("/avm", { method: 'POST', body: JSON.stringify({ "SetReg": [i, parseInt(val)] }), headers: { 'Content-Type': 'application/json' } });
+                    const json = await resp.json();
+                    console.log(json);
+                    latest = JSON.stringify(json);
+                    refreshState();
+                }
+
+                async function setMem(i, val) {
+                    const resp = await fetch("/avm", { method: 'POST', body: JSON.stringify({ "SetMem": { addr: i, data: [parseInt(val)] } }), headers: { 'Content-Type': 'application/json' } });
+                    const json = await resp.json();
+                    console.log(json);
+                    latest = JSON.stringify(json);
+                    refreshState();
+                }
+
+                for (const bt of document.querySelectorAll("#cmdpanel > button")) {
+                    bt.addEventListener("click", async function (e) {
+                        switch (e.currentTarget.innerText) {
+                            case "Refresh":
+                                await refreshState();
+                                break;
+                            default:
+                                await doCmd(e.currentTarget.innerText, true);
+                                await refreshState();
+                                if (canPoll) { await doPoll(); }
+                                break;
+                        }
+                    });
+                }
+                let regholder = document.getElementById("regview");
+
+                for (let i = 0; i < 16; i++) {
+                    let reg = document.createElement("button");
+                    reg.innerText = "R" + i + ": 0";
+                    reg.addEventListener("click", function (e) {
+                        setReg(i, prompt("Value for " + i));
+                    });
+                    regholder.appendChild(reg);
+                    regs.push(reg);
+                }
+
+                let memholder = document.getElementById("memview");
+                function growMem(count) {
+                    for (let i = mem.length; i < count; i++) {
+                        let memcell = document.createElement("button");
+                        memcell.innerText = "M" + i + ": 0";
+                        memcell.addEventListener("click", function (e) {
+                            setMem(i, prompt("Value for Mem " + i));
+                        });
+                        memholder.appendChild(memcell);
+                        mem.push(memcell);
+                    }
+                    for (let i = count; i < mem.length; i++) {
+                        mem[i].remove();
+                    }
+                }
+
+                refreshState();
+        </script>
+</body>
+
+</html>

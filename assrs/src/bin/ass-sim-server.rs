@@ -1,11 +1,15 @@
 use std::convert::Infallible;
+use std::fs::File;
 use std::future::Future;
+use std::io::Write;
 use std::net::SocketAddr;
 use std::pin::Pin;
+use std::process::{Command, Stdio};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 
+use actix_files::NamedFile;
 use actix_web::middleware::Logger;
 use actix_web::{get, web, App, HttpRequest, HttpResponse, HttpServer, Responder};
 use assrs::Machine;
@@ -18,10 +22,11 @@ enum Req {
     SetProgram(String),
     SetReg(u8, assrs::Word),
     GetRegs,
+    GetProg,
     RunProg,
     SetMem {
         addr: assrs::Word,
-        data: Vec<u8>,
+        data: Vec<u16>,
     },
     GetMem {
         addr: assrs::Word,
@@ -31,6 +36,7 @@ enum Req {
     GetBPs,
     ClearBP(u8),
     Reset,
+    MemSize,
     Step,
     SendText(String),
     Halt,
@@ -43,10 +49,12 @@ enum Resp {
     Regs(Vec<assrs::Word>),
     Text(String),
     BPReached(u8),
-    MemContents(Vec<u8>),
+    MemSize(u32),
+    MemContents(Vec<u16>),
     AssemblerError(String),
     Breakpoints(Vec<Option<assrs::Word>>),
     Halted,
+    Timeout,
     Ok,
 }
 
@@ -65,24 +73,55 @@ fn run_mach(
     };
     let mut halted = true;
     let mut ln_buf = vec![];
+    let mut prog = String::new();
     loop {
         match rx.try_recv() {
             Ok((req, tx)) => match req {
                 Req::SetProgram(asm) => {
+                    let mut cmd = Command::new("pygmentize")
+                        .args(&["-l", "asm", "-f", "html"])
+                        .stdin(Stdio::piped())
+                        .stdout(Stdio::piped())
+                        .spawn()
+                        .expect("spawning pygmentize");
+
+                    cmd.stdin
+                        .take()
+                        .expect("taking stdin")
+                        .write_all(asm.as_bytes())
+                        .unwrap();
+
+                    let output = cmd.wait_with_output().expect("waiting for pygmentize");
+                    prog = String::from_utf8_lossy(&output.stdout).to_string();
+                    println!("got {:?} from pygmentz", output);
                     let neasm: Table = new.call(64).unwrap();
-                    let () = run.call((neasm.clone(), asm)).unwrap();
-                    let buf: Table = neasm.get("buf").unwrap();
-                    let prog_bytes = buf.len().unwrap() as usize;
-                    if prog_bytes > mach.memory.len() {
-                        mach.memory
-                            .extend(std::iter::repeat(0).take(prog_bytes - mach.memory.len()));
+                    match run.call((neasm.clone(), asm)) {
+                        Ok(()) => {
+                            let buf: Table = neasm.get("buf").unwrap();
+                            let prog_bytes = buf.len().unwrap() as usize;
+                            if prog_bytes > mach.memory.len() {
+                                mach.memory.extend(
+                                    std::iter::repeat(0).take(prog_bytes - mach.memory.len()),
+                                );
+                            }
+                            for i in 1..=prog_bytes {
+                                mach.memory[i - 1] = buf.get(i).unwrap();
+                            }
+                            mach.regs[0] = 0;
+                            tx.send(Resp::Ok).unwrap();
+                            halted = true;
+                        }
+                        Err(e) => {
+                            tx.send(Resp::AssemblerError(e.to_string())).unwrap();
+                        }
                     }
-                    for i in 1..=prog_bytes {
-                        mach.memory[i - 1] = buf.get(i).unwrap();
-                    }
-                    mach.regs[0] = 0;
-                    tx.send(Resp::Ok).unwrap();
-                    halted = true;
+                }
+                Req::GetProg => {
+                    tx.send(Resp::Text(prog.clone())).unwrap();
+                }
+                Req::MemSize => {
+                    tx.send(Resp::MemSize((mach.memory.len() / 2) as u32))
+                        .unwrap();
                 }
                 Req::Step => {
                     if let assrs::StepOut::Halt = mach.step() {
@@ -130,14 +169,21 @@ fn run_mach(
                 }
                 Req::SendText(_) => todo!(),
                 Req::SetMem { addr, data } => {
-                    mach.memory[addr as usize..].copy_from_slice(&data);
+                    bytemuck::cast_slice_mut::<u8, u16>(&mut mach.memory)
+                        [addr as usize..addr as usize + data.len() as usize]
+                        .copy_from_slice(&data);
                     tx.send(Resp::Ok).unwrap();
                 }
                 Req::GetMem { addr, size } => {
-                    tx.send(Resp::MemContents(
-                        mach.memory[addr as usize..addr as usize + size as usize].to_vec(),
-                    ))
-                    .unwrap();
+                    let st = addr as usize;
+                    let mem = bytemuck::cast_slice::<u8, u16>(&mach.memory);
+                    let ed = std::cmp::min(mem.len(), addr as usize + size as usize);
+                    let cont = if st >= mem.len() {
+                        vec![]
+                    } else {
+                        mem[st..ed].to_vec()
+                    };
+                    tx.send(Resp::MemContents(cont)).unwrap();
                 }
                 Req::Halt => {
                     halted = true;
@@ -185,7 +231,7 @@ async fn http_server(
     events: web::Data<Arc<Mutex<futures::channel::mpsc::UnboundedReceiver<Resp>>>>,
 ) -> web::Json<Resp> {
     if let Req::Poll = &*req {
-        web::Json(events.lock().unwrap().next().await.unwrap_or(Resp::Halted))
+        web::Json(events.lock().unwrap().next().await.unwrap_or(Resp::Timeout))
     } else {
         println!("Asked: {:?}", req);
         let (resptx, resprx) = oneshot::channel();
@@ -217,15 +263,21 @@ async fn main() -> std::io::Result<()> {
         serde_json::to_string(&Req::SetProgram("foo".into())).unwrap()
     );
 
+    println!("printed some serdes for you to know the encodings of :)");
+
     env_logger::init_from_env(env_logger::Env::new().default_filter_or("debug"));
     HttpServer::new(move || {
         App::new()
             .wrap(Logger::default())
             .app_data(web::Data::new(tx.clone()))
             .app_data(rcv.clone())
+            .service(web::resource("/machine.html").to(|| async {
+                //let contents = include_bytes!("index.html");
+                NamedFile::open("machine.html")
+            }))
             .service(web::resource("/avm").to(http_server))
     })
-    .bind(("127.0.0.1", 8080))?
+    .bind(("0.0.0.0", 8080))?
     .run()
     .await
 }

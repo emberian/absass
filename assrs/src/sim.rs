@@ -52,6 +52,7 @@ pub enum StepOut {
     Halt,
 }
 
+#[derive(Debug)]
 pub enum ExcCause {
     DistinguishedExceptionGenerator,
     DivZero,
@@ -68,7 +69,7 @@ impl Machine {
     }
 
     fn handle_exc(&mut self, cause: ExcCause) {
-        todo!()
+        eprintln!("exc: {:?}", cause);
     }
 
     pub fn exec(&mut self, i: Insn<usize>) -> StepOut {
@@ -76,10 +77,13 @@ impl Machine {
         #[cfg(debug_assertions)]
         println!("exec {}", i);
 
-        let mut pc = self.pc() + 2;
+        self.regs[0] = (self.pc() + 2) as Word;
         match i {
             Insn::DistinguishedExceptionGenerator => {
-                self.handle_exc(ExcCause::DistinguishedExceptionGenerator)
+                self.handle_exc(ExcCause::DistinguishedExceptionGenerator);
+                self.cycles += 1;
+                self.insns += 1;
+                return Halt;
             }
             Insn::Logic { src, dst, op } => {
                 let mut res: Word = 0;
@@ -94,7 +98,6 @@ impl Machine {
                 let src = if si { src as Word } else { self.regs[src] };
                 self.regs[dst] = match op {
                     ArithOp::Add => self.regs[dst].wrapping_add(src),
-                    // make the rest of the code wrapping
                     ArithOp::Sub => self.regs[dst].wrapping_sub(src),
                     ArithOp::Shl => self.regs[dst] << src,
                     ArithOp::Shr => self.regs[dst] >> src,
@@ -125,7 +128,6 @@ impl Machine {
                 d_mode,
                 d_deref,
             } => {
-                self.regs[0] = pc as Word;
                 let s = self.regs[src];
                 let d = self.regs[dst];
                 let s_val = if let MoveMode::Decr = s_mode {
@@ -187,7 +189,7 @@ impl Machine {
             }
             Insn::Misc { a, b, op } => match op {
                 MiscOp::Swap => {
-                    self.regs[a] = self.regs[b];
+                    (self.regs[a], self.regs[b]) = (self.regs[b], self.regs[a]);
                 }
                 MiscOp::Mul => {
                     self.regs[a] = self.regs[a].wrapping_mul(self.regs[b]);
@@ -222,15 +224,15 @@ impl Machine {
                 };
                 if br { 
                     if imm {
-                        self.regs[cond].wrapping_add(val as Word * 2);
+                        self.regs[cond] = self.regs[cond].wrapping_add(val as Word * 2);
                     } else {
-                        self.regs[cond].wrapping_add(self.regs[val] * 2);
+                        self.regs[cond] = self.regs[cond].wrapping_add(self.regs[val] * 2);
                     }
                 }
             },
             Insn::JumpNZ { offset, cond } => {
                 if self.regs[cond] != 0 {
-                    pc = pc.checked_add_signed(offset as isize).unwrap();
+                    self.regs[0] = self.regs[0].checked_add_signed(offset as IWord).unwrap();
                 }
             }
             Insn::SubWord {
@@ -244,7 +246,7 @@ impl Machine {
                 let s = 8 * index;
                 let subres = (self.regs[dst] & (m << s)) >> s;
                 self.regs[dst] = if sign_extend {
-                    let bits_left = (size_of::<isize>() * 8 - 8 * (b as usize));
+                    let bits_left = size_of::<isize>() * 8 - 8 * (b as usize);
                     (((subres << bits_left) as isize) >> bits_left) as Word
                 } else {
                     subres
@@ -312,7 +314,6 @@ impl Machine {
             }
         }
 
-        self.regs[0] = pc as Word;
         self.cycles += 1;
         self.insns += 1;
         Continue
