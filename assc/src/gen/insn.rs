@@ -135,6 +135,21 @@ impl ToAsm for Xft {
 }
 
 #[derive(Debug, Clone, Hash)]
+pub enum Offset {
+    Direct(i8),
+    Expr(String),
+}
+
+impl ToAsm for Offset {
+    fn to_asm(&self) -> String {
+        match self {
+            Offset::Direct(i) => format!("{}", i),
+            Offset::Expr(e) => e.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Hash)]
 pub enum Insn {
     Logic { src: Place, dst: Place, op: LogicOp },
     Arith { src: Place, dst: Place, op: ArithOp },
@@ -145,7 +160,7 @@ pub enum Insn {
     Compare { src: Place, dst: Place, eq: bool, gt: bool, sn: bool, iv: bool },
     Transfer { src: Xft, dst: Xft },
     SysReg { reg: Place, sr: SysReg, write: bool },
-    JumpCond { reg: Place, offset: i8 },
+    JumpCond { reg: Place, offset: Offset },
     JumpLink { prog: Place, link: Place },
     SubWord { dst: Place, byte_ix: u8, bytes: u8 },
     Unknown(u16),
@@ -185,7 +200,7 @@ impl ToAsm for Insn {
             ),
             Transfer { src, dst } => format!("XF {}, {}", dst.to_asm(), src.to_asm()),
             SysReg { reg, sr, write } => format!("SR {}, {}, {}", if *write { "W" } else { "R" }, reg.to_asm(), sr),
-            JumpCond { reg, offset } => format!("JC {}, {}", reg.to_asm(), offset),
+            JumpCond { reg, offset } => format!("JC {}, {}", reg.to_asm(), offset.to_asm()),
             JumpLink { prog, link } => format!("JAL {}, {}", link.to_asm(), prog.to_asm()),
             SubWord { dst, byte_ix, bytes } => format!("SWO {}, {}, {}", dst.to_asm(), byte_ix, bytes),
             Unknown(i) => format!(".BYTE {}, {}", (i >> 8) & 0xff, i & 0xff),

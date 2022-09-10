@@ -6,9 +6,24 @@ COMMENT = _{ line_comment | block_comment }
 
 toplevel = _{ SOI ~ program ~ EOI }
 
-program = { expression }
+program = { statement+ }
 
-expression = _{ assign }
+statement = {
+	expr_statement |
+	decl_statement
+}
+	terminator = _{ ";" }
+	expr_statement = {
+		expression ~ terminator
+	}
+	decl_statement = {
+		ident ~ (initializer ~ ",")* ~ initializer ~ terminator
+	}
+		initializer = {
+			ident ~ ("=" ~ expression)?
+		}
+
+expression = { assign }
 
 assign = {
 	logic_or ~ (op_assign ~ assign)*
@@ -74,7 +89,7 @@ unary = {
 		op_not = { "!" }
 		op_cmp = { "~" }
 
-atom = _{ literal | ident | "(" ~ expression ~ ")" }
+atom = _{ literal | branch | ident | block | "(" ~ expression ~ ")" }
 
 literal = { lit_float | lit_int }
 	lit_int = { lit_hex | lit_oct | lit_bin | lit_dec }
@@ -88,3 +103,9 @@ literal = { lit_float | lit_int }
 	}
 
 ident = @{ XID_START ~ XID_CONTINUE* }
+
+branch = { "if" ~ expression ~ expression ~ ("else" ~ expression)? }
+
+block = {
+	"{" ~ statement* ~ expression ~ "}"
+}

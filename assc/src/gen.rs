@@ -7,7 +7,7 @@ pub mod rall;
 
 use insn::*;
 
-use crate::grammar::{Namespace, Program, Expr};
+use crate::grammar::{self, Program, Stmts};
 use env::Env;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -20,7 +20,7 @@ pub enum ExprCx {
 pub struct Cx {
     next_temp: Temp,
     next_block: usize,
-    pub ns: Namespace,
+    pub gcx: grammar::Context,
     pub env: Env,
     pub ecx: ExprCx,
 }
@@ -52,8 +52,8 @@ impl ToAsm for Line {
         match self {
             Line::Insn(i) => i.to_asm(),
             Line::Label(l) => format!("{}:", l),
-            Line::Word(w) => format!(".WORD {}", w),
-            Line::WordExpr(s) => format!(".WORD {}", s),
+            Line::Word(w) => format!(".WORD {};", w),
+            Line::WordExpr(s) => format!(".WORD {};", s),
         }
     }
 }
@@ -135,17 +135,17 @@ impl Block {
     }
 }
 
-pub type Top = Expr;
+pub type Top = Stmts;
 
 impl Cx {
     pub fn new(pgm: Program) -> (Self, Top) {
         (Cx {
             next_temp: 0,
             next_block: 0,
-            ns: pgm.ns,
+            gcx: pgm.context,
             env: Env::new(),
             ecx: ExprCx::Read,
-        }, pgm.expr)
+        }, pgm.stmts)
     }
 
     pub fn temp(&mut self) -> Place {

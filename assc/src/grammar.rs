@@ -39,6 +39,12 @@ impl Namespace {
     }
 }
 
+impl Default for Namespace {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub enum Value {
     SInt(isize),
@@ -102,7 +108,19 @@ pub enum Expr {
     Literal(Value),
     BinOp(Box<Expr>, BinOp, Box<Expr>),
     UnOp(UnOp, Box<Expr>),
+    Branch(Box<Expr>, Box<Expr>, Box<Expr>),
+    Block(Stmts, Box<Expr>),
+    Null,
 }
+
+#[derive(Debug, Clone)]
+pub enum Stmt {
+    Expr(Expr),
+    Decl(Name, Vec<Binding>),
+}
+
+#[derive(Debug, Clone)]
+pub struct Binding(pub Name, pub Option<Expr>);
 
 #[inline(always)]
 fn child(par: Pair<'_, Rule>) -> Pair<'_, Rule> {
@@ -110,12 +128,14 @@ fn child(par: Pair<'_, Rule>) -> Pair<'_, Rule> {
 }
 
 impl Expr {
-    pub fn from_ex(ex: Pair<'_, Rule>, ns: &mut Namespace) -> Self {
+    pub fn from_ex(ex: Pair<'_, Rule>, cx: &mut Context) -> Self {
         let rule = ex.as_rule();
         match rule {
-            Rule::atom => Self::from_ex(child(ex), ns),
-            Rule::literal => Self::from_ex(child(ex), ns),
-            Rule::lit_int => Self::from_ex(child(ex), ns),
+            Rule::expression => Self::from_ex(child(ex), cx),
+
+            Rule::atom => Self::from_ex(child(ex), cx),
+            Rule::literal => Self::from_ex(child(ex), cx),
+            Rule::lit_int => Self::from_ex(child(ex), cx),
 
             Rule::lit_float => Expr::Literal(
                 Value::F64(ex.as_str().parse().unwrap())
@@ -140,11 +160,11 @@ impl Expr {
                 Value::UInt(ex.as_str().parse().unwrap())
             ),
 
-            Rule::ident => Expr::Name(ns.index_of(ex.as_str())),
+            Rule::ident => Expr::Name(cx.var_ns.index_of(ex.as_str())),
 
             Rule::unary => {
                 let mut it = ex.into_inner().rev();
-                let mut ex = Self::from_ex(it.next().unwrap(), ns);
+                let mut ex = Self::from_ex(it.next().unwrap(), cx);
                 while let Some(op) = it.next() {
                     ex = Expr::UnOp(
                         UnOp::from_rule(op.as_rule()).unwrap(),
@@ -165,26 +185,92 @@ impl Expr {
             Rule::arith_factor
             => {
                 let mut it = ex.into_inner();
-                let mut ex = Self::from_ex(it.next().unwrap(), ns);
+                let mut ex = Self::from_ex(it.next().unwrap(), cx);
                 while let Some(op) = it.next() {
                     ex = Expr::BinOp(
                         Box::new(ex),
                         BinOp::from_rule(op.as_rule()).unwrap(),
-                        Box::new(Self::from_ex(it.next().unwrap(), ns)),
+                        Box::new(Self::from_ex(it.next().unwrap(), cx)),
                     );
                 }
                 ex
             },
 
-            _ => unreachable!(),
+            Rule::branch => {
+                let mut it = ex.into_inner();
+                Expr::Branch(
+                    Box::new(Expr::from_ex(it.next().unwrap(), cx)),
+                    Box::new(Expr::from_ex(it.next().unwrap(), cx)),
+                    Box::new(if let Some(node) = it.next() {
+                        Expr::from_ex(node, cx)
+                    } else {
+                        Expr::Null
+                    }),
+                )
+            },
+
+            Rule::block => {
+                let mut it = ex.into_inner();
+                let mut stmts = Vec::new();
+                loop {
+                    let node = it.next().unwrap();
+                    let r = node.as_rule();
+                    match r {
+                        Rule::statement => stmts.push(Stmt::from_st(node, cx)),
+                        Rule::expression => break Expr::Block(Stmts(stmts), Box::new(Expr::from_ex(node, cx))),
+
+                        _ => panic!("unexpected node in block: {:?}", r),
+                    }
+                }
+            },
+
+            _ => panic!("unexpected node for Expr: {:?}", rule),
         }
     }
 }
 
+impl Stmt {
+    pub fn from_st(st: Pair<'_, Rule>, cx: &mut Context) -> Self {
+        let rule = st.as_rule();
+        match rule {
+            Rule::statement => Self::from_st(child(st), cx),
+            Rule::expr_statement => Stmt::Expr(Expr::from_ex(child(st), cx)),
+            Rule::decl_statement => {
+                let mut it = st.into_inner();
+                let name = cx.ty_ns.index_of(it.next().unwrap().as_str());
+                let bindings = it
+                    .map(|init| {
+                        let mut it = init.into_inner();
+                        let name = cx.var_ns.index_of(it.next().unwrap().as_str());
+                        let value = if let Some(ex) = it.next() {
+                            Some(Expr::from_ex(ex, cx))
+                        } else {
+                            None
+                        };
+                        Binding(name, value)
+                    })
+                    .collect();
+                Stmt::Decl(name, bindings)
+            }
+
+            _ => panic!("unexpected node for Stmt: {:?}", rule),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct Context {
+    pub var_ns: Namespace,
+    pub ty_ns: Namespace,
+}
+
+#[derive(Debug, Clone)]
+pub struct Stmts(pub Vec<Stmt>);
+
 #[derive(Debug, Clone)]
 pub struct Program {
-    pub expr: Expr,
-    pub ns: Namespace,
+    pub stmts: Stmts,
+    pub context: Context,
 }
 
 impl Program {
@@ -193,8 +279,10 @@ impl Program {
     }
 
     pub fn from_program(pgm: Pair<'_, Rule>) -> Self {
-        let mut ns = Namespace::new();
-        let ex = Expr::from_ex(child(pgm), &mut ns);
-        Self { expr: ex, ns }
+        let mut cx = Context::default();
+        let stmts: Vec<Stmt> =
+            pgm.into_inner().map(|st| Stmt::from_st(st, &mut cx))
+            .collect();
+        Self { stmts: Stmts(stmts), context: cx }
     }
 }

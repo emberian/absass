@@ -25,7 +25,7 @@ fn main() -> std::io::Result<()> {
     for (time, line) in lines.iter().enumerate() {
         println!("{}: {}", time, line.to_asm());
     }
-    println!("\t(the result is in {})", res.place.unwrap().to_asm());
+    // println!("\t(the result is in {})", res.place.unwrap().to_asm());
     let mut rc = RaCx::new(Default::default(), lines.clone());
     rc.allocate();
     for temp_desc in rc.temp_descs.values() {
@@ -55,8 +55,8 @@ fn main() -> std::io::Result<()> {
         println!(" . {}: {}", time, line.to_asm());
     }
     let newlines = rc.to_linear();
-    for (time, line) in newlines.iter().enumerate() {
-        println!("{}: {}", time, line.to_asm());
+    for (_, line) in newlines.iter().enumerate() {
+        println!("{}", line.to_asm());
     }
     Ok(())
 }

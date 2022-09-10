@@ -1,12 +1,12 @@
 use super::*;
 use super::env::Bind;
-use crate::grammar::{Expr, Value, BinOp, UnOp};
+use crate::grammar::{Expr, Value, BinOp, UnOp, Stmt, Binding};
 
 impl Gen for Expr {
     fn gen(&self, cx: &mut Cx) -> Res {
         match self {
             Expr::Name(nm) => {
-                let name = cx.ns.name_of(*nm).expect("unexpected unnamed variable");
+                let name = cx.gcx.var_ns.name_of(*nm).expect("unexpected unnamed variable");
                 if cx.ecx == ExprCx::Read {
                     panic!("use of uninitialized name {}, var {:?}", nm, name);
                 }
@@ -245,6 +245,115 @@ impl Gen for Expr {
                 }
                 Res { block: Some(bk), place: Some(ep) }
             },
+            Expr::Branch(cond, ift, iff) => {
+                let condr = cond.gen(cx);
+                let (condb, condp) = (
+                    condr.block.expect("invalid cond block"),
+                    condr.place.expect("invalid cond place"),
+                );
+                let iftr = ift.gen(cx);
+                let (iftb, iftp) = (
+                    iftr.block.expect("invalid true block"),
+                    iftr.place.expect("invalid true place"),
+                );
+                let iffr = iff.gen(cx);
+                let (iffb, iffp) = (
+                    iffr.block.expect("invalid false block"),
+                    iffr.place.expect("invalid false place"),
+                );
+                let res = cx.temp();
+                let mut whole = cx.block();
+                let condb = condb
+                    .after(Insn::JumpCond {
+                        reg: condp,
+                        offset: Offset::Expr(format!("{} - $ - 2", iftb.label)),
+                    }.into())
+                    .load_into(cx,
+                               Place::Reg(0),
+                               Place::Label(iffb.label.clone())
+                    );
+                let end = cx.block();
+                whole = whole
+                    .child(condb)
+                    .child(iftb
+                           .load_into(cx, res.clone(), iftp)
+                           .load_into(cx, Place::Reg(0), Place::Label(end.label.clone())))
+                    .child(iffb
+                           .load_into(cx, res.clone(), iffp))
+                    .child(end);
+                Res { block: Some(whole), place: Some(res) }
+            },
+            Expr::Block(stmts, ex) => {
+                let mut bk = cx.block();
+                for stmt in &stmts.0[..] {
+                    let res = stmt.gen(cx);
+                    if let Some(b) = res.block {
+                        bk = bk.child(b);
+                    }
+                }
+                let exr = ex.gen(cx);
+                if let Some(b) = exr.block {
+                    bk = bk.child(b);
+                }
+                Res { block: Some(bk), place: exr.place }
+            },
+            Expr::Null => {
+                Res { block: None, place: None }
+            },
         }
+    }
+}
+
+impl Gen for Stmt {
+    fn gen(&self, cx: &mut Cx) -> Res {
+        match self {
+            Stmt::Expr(e) => {
+                let exr = e.gen(cx);
+                Res { block: exr.block, place: None }
+            },
+            Stmt::Decl(ty, bnds) => {
+                // TODO: type sizes
+                let mut bk = cx.block();
+                // Storage first...
+                for Binding(nm, _) in bnds {
+                    bk = bk
+                        .before(
+                            Line::Label(cx.gcx.var_ns.name_of(*nm).expect("unexpected unnamed variable").to_string())
+                        )
+                        .before(
+                            Line::Word(0)
+                        );
+                }
+                // ... init after
+                for Binding(nm, init) in bnds {
+                    if let Some(ex) = init {
+                        let exr = ex.gen(cx);
+                        if let Some(b) = exr.block {
+                            bk = bk
+                                .child(b
+                                       .load_into(cx,
+                                                  Place::Label(cx.gcx.var_ns.name_of(*nm).expect("unexpected unnamed variable").to_string()),
+                                                  exr.place.expect("invalid initializer")
+                                        )
+                                       );
+                        }
+                    }
+                }
+                Res { block: Some(bk), place: None }
+            }
+        }
+    }
+}
+
+impl Gen for Stmts {
+    fn gen(&self, cx: &mut Cx) -> Res {
+        let mut bk = cx.block();
+        for st in &self.0[..] {
+            let sr = st.gen(cx);
+            if let Some(b) = sr.block {
+                bk = bk.child(b);
+            }
+        }
+        Res { block: Some(bk), place: None }
     }
 }

@@ -82,11 +82,11 @@ impl RegDesc {
     }
 
     pub fn span_mut_starting_at(&mut self, t: usize) -> Option<&mut Span> {
-        // let spans = self.spans.clone();  // XXX for debugging only!
+        let spans = self.spans.clone();  // XXX for debugging only!
         for spn in self.spans.iter_mut() {
             if t == spn.0 { return Some(spn); }
         }
-        // println!("WARN: no span found at time {} for reg {}; defs {:?}, uses {:?}, spans {:?}", t, self.reg, self.defs, self.uses, spans);
+        println!("WARN: no span found at time {} for reg {}; defs {:?}, uses {:?}, spans {:?}", t, self.reg, self.defs, self.uses, spans);
         None
     }
 
@@ -383,6 +383,10 @@ impl RaCx {
                             // The last use killed the last span
                             if let Some(death) = last_use {
                                 desc.spans.push(Span::new(birth, death));
+                            } else {
+                                println!("WARN: unused value, temp {} at time {}", desc.reg, time);
+                                // This span is still needed by reg_pass anyway
+                                desc.spans.push(Span::new(birth, time));
                             }
                         }
                         last_def = Some(time);
@@ -402,6 +406,10 @@ impl RaCx {
                         let end = last_time.unwrap() + 1;
                         desc.spans.push(Span::new(birth, end));
                     }
+                } else {
+                    // If we're here, the desc was defined at least once but never used.
+                    // This is a rather degenerate case, but reg_pass still needs a span anyway.
+                    desc.spans.push(Span::new(birth, last_time.unwrap() + 1));
                 }
             }
         }
