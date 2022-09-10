@@ -134,7 +134,7 @@ pub enum Insn<Reg> {
     },
 }
 
-pub trait RegEnc: std::fmt::Display+Copy {
+pub trait RegEnc: std::fmt::Display + Copy {
     fn reg(r: u16) -> Self;
     fn imm(r: u16) -> Self;
     fn enc(self) -> u16;
@@ -162,7 +162,6 @@ impl RegEnc for usize {
     }
 }
 
-
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy, enum_utils::IterVariants)]
 pub enum MiscOp {
     Swap,
@@ -181,6 +180,20 @@ impl<R: RegEnc> std::fmt::Display for Insn<R> {
     }
 }
 impl MiscOp {
+    pub fn from_u8(val: u8) -> MiscOp {
+        match val {
+            0 => MiscOp::Swap,
+            1 => MiscOp::Mul,
+            2 => MiscOp::Div,
+            3 => MiscOp::Mod,
+            4 => MiscOp::LoadR,
+            5 => MiscOp::StoreR,
+            6 => MiscOp::Loop,
+            7 => MiscOp::LoopI,
+            _ => panic!("invalid misc op"),
+        }
+    }
+
     fn brief(&self) -> &'static str {
         use MiscOp::*;
         match self {
@@ -352,7 +365,34 @@ impl<R: RegEnc> Insn<R> {
                     sign_extend,
                 }
             }
+            0xe000 => match val & 0x800 {
+                0 => {
+                    let a = val & 0xf;
+                    let b = (val & 0xf0) >> 4;
+                    let op = (val & 0x700) >> 8;
+                    Insn::Misc {
+                        a: R::reg(a),
+                        b: R::reg(b),
+                        op: MiscOp::from_u8(op as u8),
+                    }
+                }
+                1 => {
+                    let cond = val & 0xf;
+                    let valu = (val & 0xf0) >> 4;
+                    let s = ((val >> 8) & 0x1) != 0;
+                    let inv = ((val >> 9) & 0x1) != 0;
+                    let gt = ((val >> 10) & 0x1) != 0;
 
+                    Insn::ShortBranch {
+                        cond: R::reg(cond),
+                        val: if s { R::imm(valu) } else { R::reg(valu) },
+                        inv,
+                        gt,
+                        imm: s,
+                    }
+                }
+                _ => unreachable!(),
+            },
             0xa000..=0xb000 => {
                 let write = (val & 0x1000) >> 12;
                 let reg = (val & 0xf00) >> 8;
@@ -446,13 +486,7 @@ impl<R: RegEnc> Insn<R> {
             Insn::Compare { src, dst, .. } => {
                 format!("{} R{}, R{}", self.brief().unwrap(), dst, src)
             }
-            Insn::ShortBranch {
-                cond,
-                imm,
-                val,
-                inv,
-                gt,
-            } => {
+            Insn::ShortBranch { cond, imm, val, .. } => {
                 format!(
                     "{} R{}, {}",
                     self.brief().unwrap(),
