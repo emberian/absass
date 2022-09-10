@@ -5,6 +5,7 @@
 \font\secfont=cmb12 at 16pt
 \font\subsecfont=cmb12
 
+\message{Macros,}
 \newcount\chapno \chapno=0
 \newcount\secno \secno=0
 \newcount\subsecno \subsecno=0
@@ -12,15 +13,21 @@
 %\def\title#1{\line{#1\hss}\hrule\bigskip}
 \expandafter\ifx\csname everytitle\endcsname\relax\def\everytitle#1{}\fi
 \def\title#1{%
-\chapno=0\secno=0\subsecno=0%
 % Order is important: do \everytitle first, in case it \ejects, because we
 % would want to hold over \headline in that case.
 \everytitle{#1}%
 \headline={\vbox{\line{#1\hss}\vskip2pt\hrule}}%
 }
 
+\newif\ifgentoc \gentoctrue
+\ifx\nogentoc\undefined\else\gentocfalse\fi
+
 \newwrite\toc
-\immediate\openout\toc=toc.tex
+\ifgentoc
+\message{Write TOC,}\immediate\openout\toc=toc.tex
+\else
+\message{No TOC,}
+\fi
 
 \def\chapter#1{
 	\global\advance\chapno by1
@@ -28,7 +35,7 @@
 	\global\subsecno=0
 	\vfil\penalty-50\vfilneg\medskip
 	{\chapterfont Chapter \the\chapno. #1}\bigskip
-	\xdef\dowrite{\write\toc{\string\tocchap{\the\chapno}{#1}{\noexpand\the\noexpand\count0}}}\dowrite
+	\xdef\dowrite{\write\toc{\string\tocchap{\the\chapno}{#1}{\noexpand\the\noexpand\count0}}}\ifgentoc\dowrite\fi
 }
 
 \def\section#1{
@@ -36,7 +43,7 @@
 	\global\subsecno=0
 	\vfil\penalty-50\vfilneg\medskip  % A "smaller" \filbreak
 	{\secfont Section \the\secno. #1}\medskip
-	\xdef\dowrite{\write\toc{\string\tocsec{\the\secno}{#1}{\noexpand\the\noexpand\count0}}}\dowrite
+	\xdef\dowrite{\write\toc{\string\tocsec{\the\secno}{#1}{\noexpand\the\noexpand\count0}}}\ifgentoc\dowrite\fi
 }
 
 \def\subsection#1{
@@ -44,10 +51,10 @@
 	{\subsecfont Subsection \the\subsecno. #1}\smallskip
 }
 
-\def\tocleader{\leaders\hbox to 8pt{\hss$\cdot$\hss}}
+\def\tocleader{\leaders\hbox to 8pt{\hss.\hss}}
 \def\tocpgnum#1{\hbox to 12pt{\hss\ifnum#1<0 \romannumeral-#1\else#1\fi}}
-\outer\def\tocchap#1#2#3{\medskip\line{{\bf Chapter #1. #2}\tocleader\hfil\tocpgnum{#3}}}
-\outer\def\tocsec#1#2#3{\line{\hbox{\qquad Section #1. #2}\tocleader\hfil\tocpgnum{#3}}}
+\outer\def\tocchap#1#2#3{\message{Chapter #1,}\medskip\line{{\bf Chapter #1. #2}\tocleader\hfil\tocpgnum{#3}}}
+\outer\def\tocsec#1#2#3{\message{Section #1,}\line{\hbox{\qquad Section #1. #2}\tocleader\hfil\tocpgnum{#3}}}
 
 % Tagged semantics
 \def\insn#1{{\tt#1}}
@@ -56,6 +63,7 @@
 
 % Lists
 \def\li{\item{$\bullet$}}
+\def\lili{\itemitem{$\bullet$}}
 
 % Blocks
 \def\startblock{\bigskip\begingroup\leftskip=4em\rightskip=4em\parindent=0pt\tt\obeylines}
@@ -63,3 +71,15 @@
 
 % Conditional termination
 \expandafter\ifx\csname maybye\endcsname\relax\let\maybye=\end\fi
+
+% Commonly-used symbols (for consistency)
+
+\def\ass{{\tt ASS}}
+\def\wsi{{\tt W}}
+\def\asi{{\tt A}}
+\def\isi{{\tt J}}
+\def\ist{{\tt S$_J$}}
+\def\wst{{\tt S$_W$}}
+\def\ins{{\tt I}}
+\def\rg#1,#2.{$[#1:#2]$}
+\def\ix#1{$[#1]$}

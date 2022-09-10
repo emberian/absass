@@ -6,10 +6,10 @@
 \def\rg#1,#2.{$[#1:#2]$}
 \def\ix#1{$[#1]$}
 
-\chapter{ASS16}
+\chapter{\ass\ 16}
 
-The following is the encoding of ASS16, a 16-bit instruction-symbol ISA. Values
-are given in their natural (big-endian) representation, such that in
+The following is the encoding of \ass\ 16, a 16-bit instruction-symbol ISA.
+Values are given in their natural (big-endian) representation, such that in
 \code{0xABCD}, \code{A} is the most significant digit.
 
 \bigskip
@@ -32,8 +32,8 @@ bitstring is $a - b$.
 
 The following sections assume that the instruction word is \ins.
 
-ASS16 has 16 General-Purpose Registers (GPRs). Where an instruction encodes 4
-bits for a ``register'', and implicitly refers to its value within the
+\ass\ 16 has 16 General-Purpose Registers (GPRs). Where an instruction encodes
+4 bits for a ``register'', and implicitly refers to its value within the
 description, this should be taken to be the value stored {\it within} the
 register so numbered. All registers can be accessed in this fashion, but
 \reg{R0} is the Program Counter (\reg{PC}), so its value will be used to fetch
@@ -44,21 +44,30 @@ convention document for details.
 The GPRs are not to be confused with the SRs, System Registers, which are far
 less frequently accessed; see that section for details.
 
-ASS is entirely independent of word size; it is assumed that the registers and
-memory bus can be of any size, though 16, 32, and 64 bit are envisioned.
-Instructions below may need to refer to ``the word size in bytes'', but this is
-done per-instantiation, and care has generally been taken to ensure that
-instruction codings do not vary with word size. For a given instantiation, the
-device is specified as ``ASS16/W'', where W is the word size---for example,
-``ASS16/32'' would be a 32-bit bus, 16-bit instruction ASS CPU.
-
 \vfil \break
 
 \section{Distinguished Exception Generator}
 
 \noindent\ins\rg 16,0. \code{== 0}
 
-Enter the exception handling routine with cause == 1.
+Enter the exception handling routine with cause \reg{SR 9} \code{== 1}, if
+interrupts are enabled. Otherwise, do nothing.
+
+\section{Exception Return}
+
+\noindent\ins\rg 16,0. \code{== 1}
+
+Reverse the architectural exception routine, atomically. Specifically, this:
+
+\li Sets \reg{PC} to \reg{SR 8} (the Exception Continuation register); and
+\li Clears \reg{SR 63}, enabling interrupts;
+
+all in one instruction, thus preventing a race between either of these actions.
+
+(Non-exceptional returns are better handled by either moving from the
+ABI-defined Continuation Register, or ``popping'' from the ABI-defined stack,
+into PC, using the \code{XF} Data Transfer instruction. See that instruction
+and the calling convention for details.)
 
 \section{Bitwise Instructions}
 
@@ -127,11 +136,11 @@ number, and that register's value is to be used as \reg{S}.
 		height2pt&\omit&&\omit&&\omit&\cr
 		&0&&Add ($D = D + S$)&&&\cr
 		&1&&Sub ($D = D - S$)&&&\cr
-		&2&&Shl ($D = D << S$, fill $0$)&&&\cr
-		&3&&Shr ($D = D >> S$, fill $0$)&&&\cr
-		&4&&Asr ($D = D >> S$, fill MSB of $D$)&&&\cr
-		&5&&Rol ($D = D rol S$, rotate left)&&&\cr
-		&6&&Ror ($D = D ror S$, rotate right)&&&\cr
+		&2&&Shl ($D = D \ll S$, fill $0$)&&&\cr
+		&3&&Shr ($D = D \gg S$, fill $0$)&&&\cr
+		&4&&Asr ($D = D \gg S$, fill MSB of $D$)&&&\cr
+		&5&&Rol ($D = D \triangleleft S$, rotate left)&&&\cr
+		&6&&Ror ($D = D \triangleright S$, rotate right)&&&\cr
 		&7&&Neg ($D = - S$, signed negation)&&&\cr
 		height2pt&\omit&&\omit&&\omit&\cr
 		\noalign{\hrule}
@@ -184,9 +193,10 @@ The resulting table of operations, with some redundancy, is as follows, with
 \li \ins\rg 8,0. (\code{S}) Signed Offset, Instructions ($-128$--$127$)
 \li \ins\rg 12,8. (\reg{C}) Comparison Register (0--15)
 
-If the value of \reg{C} is nonzero, \reg{PC} is offset by \code{S} from the
-{\it next} instruction. The value of \code{S} is interpreted to be in {\it
-instruction words} (typically 2 bytes for ASS16).
+If the value of \reg{C} is nonzero, \reg{PC} is offset by \code{S}
+(specifically, \code{S * \ist} addressable units) from the {\it next}
+instruction. Thus, the value of \code{S} is interpreted to be in {\it
+instruction words} (typically 2 bytes for \ass\ 16 over octets).
 
 \section{Short-range Branches}
 
@@ -198,11 +208,11 @@ instruction words} (typically 2 bytes for ASS16).
 \li \ins\ix{9}. (\code{I)} Invert Flag
 \li \ins\ix{10}. (\code{G}) Greater Flag
 
-Compare the \reg{V} register with zero. If the greater flag is set, perform a signed
-magnitude comparison. If the greater flag is clear, perform an equality test. The final
-outcome is inverted if \code{I} is set. If the outcome is true, add the \reg{V} register
-to \reg{PC} if \code{S} is clear, otherwise multiply the number encoded as \reg{V} by
-2 and add it to \reg{PC}.
+Compare the \reg{V} register with zero. If the greater flag is set, perform a
+signed magnitude comparison. If the greater flag is clear, perform an equality
+test. The final outcome is inverted if \code{I} is set. If the outcome is true,
+add the \reg{V} register to \reg{PC} if \code{S} is clear, otherwise multiply
+the number encoded as \reg{V} by \ist\ and add it to \reg{PC}.
 
 \section{Miscellaneous Two-register Functionality}
 
@@ -217,20 +227,20 @@ to \reg{PC} if \code{S} is clear, otherwise multiply the number encoded as \reg{
 	\offinterlineskip
 	\halign{&\vrule#&\strut\quad#\hfil\quad\cr
 		\noalign{\hrule}
-		height2pt&\omit&&\omit&&\omit&\cr
-		&{\bf Mode}&&{\bf Operation}&&{\bf Note}&\cr
-		height2pt&\omit&&\omit&&\omit&\cr
+		height2pt&\omit&&\omit&&\omit&&\omit&\cr
+		&{\bf Mode}&&{\bf Operation}&&{\bf Description}&&{\bf Note}&\cr
+		height2pt&\omit&&\omit&&\omit&&\omit&\cr
 		\noalign{\hrule}
-		height2pt&\omit&&\omit&&\omit&\cr
-		&0&&Swap&$$A = B, B = A$$&&&\cr
-		&1&&Mul&$$A = A * B$$&&*&\cr
-		&2&&Div&$$A = A / B$$, fractional part&&*&\cr
-		&3&&Mod&$$A = A \% B$$, integer part&&*&\cr
-		&4&&LoadReg&$$A = regs[B]$$&&&\cr
-		&5&&StoreReg&$$regs[B] = A$$&&&\cr
-		&6&&Loop&$$A -= 1, if A != 0 { PC += B }$$&&&\cr
-		&7&&Loop Indirect&$$A -= 1, if A != 0 { PC += imm(B) * 2 }$$&&&\cr
-		height2pt&\omit&&\omit&&\omit&\cr
+		height2pt&\omit&&\omit&&\omit&&\omit&\cr
+		&0&&Swap&&{\tt A = B, B = A}&&&\cr
+		&1&&Mul&&{\tt A = A * B}&&\hfil*&\cr
+		&2&&Div&&{\tt A = A / B}, fractional part&&\hfil*&\cr
+		&3&&Mod&&{\tt A = A \% B}, integer part&&\hfil*&\cr
+		&4&&LoadReg&&{\tt A = regs[B]}&&&\cr
+		&5&&StoreReg&&{\tt regs[B] = A}&&&\cr
+		&6&&Loop Indirect&&{\tt A -= 1, if A != 0 \string{ PC += B \string}}&&&\cr
+		&7&&Loop&&{\tt A -= 1, if A != 0 \string{ PC += B$_{imm}$ * \ist\ \string}}&&&\cr
+		height2pt&\omit&&\omit&&\omit&&\omit&\cr
 		\noalign{\hrule}
 	}
 }
@@ -318,10 +328,8 @@ to the hardware. The defined ones are as follows:
 		&1&&R&&Word Size&&In bits.&\cr
 		\trule{2pt}
 		&2&&RW&&Exception Handling Routine&&\tcell{%
-			\li Bit 0: Exceptions enabled. Automatically cleared when entering
-			the routine.
-			\li All others: loaded into \reg{PC} when an exception or interrupt
-			occurs; bit 0 of \reg{PC} is set to 0. (See also \reg{SR 8}.)
+			Loaded into \reg{PC} when an exception or interrupt occurs. (See
+			also \reg{SR 8}, \reg{SR 9}, \reg{SR 11}, and \reg{SR 63}.)
 		}&\cr
 		\trule{2pt}
 		&3&&W&&Power State&&\tcell{%
@@ -357,17 +365,16 @@ to the hardware. The defined ones are as follows:
 		}&\cr
 		\trule{2pt}
 		&9&&RW&&Exception Cause&&\tcell{%
-			\li Bit 0: Registered Exception. If set, the remaining bits
-			(logically right shifted by one) have an ISA-determined
-			interpretation:
+			If this is a Registered Exception (see \reg{SR 11}), this has one
+			of the predefined values:
 			\par\vtop{ \advance\leftskip by\parindent\noindent
 				\li 0: Divide by zero
 				\li 1: Illegal instruction
 				\li 2: Supervisor request
 			}
-			\hang Otherwise (if Bit 0 is clear), the entire register contains
-			the physical MMIO address of the device responsible for raising a
-			hardware interrupt.
+			\noindent Otherwise (if not a Registered Exception), the entire register
+			contains the physical MMIO address of the device responsible for
+			raising a hardware interrupt.
 		}&\cr
 		\trule{2pt}
 		&10&&W&&Unofficial Debug Port&&\tcell{%
@@ -376,6 +383,28 @@ to the hardware. The defined ones are as follows:
 			register, but it may be of some use to expose them via an external
 			debugging interface.
 		}&\cr
+		\trule{2pt}
+		&11&&RW&&Exception Status&&\tcell{%
+			\li Bit 0: External exceptions enabled. When clear, any external
+			exception pins are ignored. The Distinguished Exception Generator
+			still interrupts as usual.
+			\li Bit 1: Registered exception. If set, the Exception Cause
+			\reg{SR 9} is a predefined ISA exception; otherwise, it is the MMIO
+			address of the causative hardware. See that SR for details.
+		}&\cr
+		&63&&RW&&Exceptions Enabled&&\tcell{%
+			\li Bit 0: Exceptions enabled. When clear, no exception at all is
+			handled, including by the Distinguished Exception Generator, which
+			is ignored. 
+			\li All other bits: ignored.
+			\noindent This SR contains only one bit so as to guarantee that
+			enabling/disabling interrupts is atomic at the instruction level.
+			In general, manipulating or even reading the other exception
+			registers should be guarded with this SR set, either by the
+			architecture when an interrupt is handled, or by setting this SR
+			manually.
+		}&\cr
+		\trule{2pt}
 		\trule{2pt}
 		&64 -- 255&&-&&Extensions&&Reserved for extenders.&\cr
 		\tspace{2pt}

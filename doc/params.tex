@@ -1,0 +1,58 @@
+\input _macros
+
+\title{Parameters of \ass\ Cores}
+
+\chapter{Sizes}
+
+\ass\ is agnostic to three size parameters:
+
+\medskip
+
+\li \wsi, the ``word size'', or, equivalently, the size of an address on the
+platform. This parameter is equivalent to a number of other important
+parameters:
+
+\smallskip
+
+\lili The width of the registers; and
+\lili The minimum width of the memory/cache data bus.
+
+\smallskip
+
+\li \asi, the ``addressable unit'', which represents the granularity of memory
+acccesses. This parameter cannot meaningfully be larger than \wsi. Most modern
+platforms use ``octets'' (8 bits).
+
+\li \isi, the ``instruction size'' (the letter ``J'' chosen because it is the
+amount of bits by which one must \underbar{J}ump to the next
+instruction)---presently, only a 16-bit \isi is defined, with a 32-bit being
+considered experimental. (Some other important parameters, such as the number
+of registers, may vary between instruction sizes; the details are not yet
+complete.)
+
+\medskip
+
+From these parameters, the following are also defined:
+
+\medskip
+
+\li {\tt \ist\ = \isi\ / \asi}, rounded up, is the ``instruction step size'',
+which is the number of addressable units by which \reg{PC} must be advanced to
+point to the next instruction. For example, if \isi\ is 16 and \asi\ is 8, then
+\ist\ is 2.
+
+\li {\tt \wst\ = \wsi\ / \asi}, rounded up, is the ``word step size'', which is
+the number of addessable units by which a pointer (address) must be incremented
+to point to the next word (relevant, for example, for the Data Transfer
+\code{XF} instruction). For example, if \wsi\ is 64 and \asi\ is 8, then \wst\
+is 8.
+
+\chapter{Naming}
+
+The name of a single \ass\ core instantiation is as follows:
+
+{\noindent\qquad\tt\ass\ \isi/\wsi}
+
+(TODO: \asi\ is left unstated.)
+
+\maybye
