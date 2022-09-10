@@ -467,14 +467,31 @@ include as many "long instruction" header packets in their coding as necessary.
 
 \subsection{32-bit Format}
 
+\medskip
+{
+	\offinterlineskip
+	\halign{&\vrule#&\tt\quad#\hfil\quad\cr
+		\noalign{\hrule}
+		height2pt&\omit&&\omit&&\omit&&\omit&\cr
+		&0b1111&&0b0001&&A&&B&\cr
+		height2pt&\omit&&\omit&&\omit&&\omit&\cr
+		\noalign{\hrule}
+		height2pt&\omit&&\omit&&\omit&&\omit&\cr
+		&E&&F&&H&&L&\cr
+		height2pt&\omit&&\omit&&\omit&&\omit&\cr
+		\noalign{\hrule}
+	}
+}
+\medskip
+
 \li \ins\rg 32,28. \code{== 0b1111}
 \li \ins\rg 28,24. \code{== 0x1} (One additional 16-bit symbol to follow)
-\li \ins\rg 24,20. (\code{A}) Input Register
-\li \ins\rg 20,16. (\code{B}) Input Register
+\li \ins\rg 24,20. (\code{A})
+\li \ins\rg 20,16. (\code{B})
 \li \ins\rg 16,12. (\code{E}) \code{== 0x0} (Extension ID)
-\li \ins\rg 12,8. (\code{F}) Operation Number (0--1)
-\li \ins\rg 8,4. (\code{H}) Output Register, Hi Word
-\li \ins\rg 4,0. (\code{L}) Output Register, Lo Word
+\li \ins\rg 12,8. (\code{F}) Operation Number (0--3)
+\li \ins\rg 8,4. (\code{H})
+\li \ins\rg 4,0. (\code{L})
 
 The \code{E} field, when nonzero, is reserved for extenders.
 
@@ -489,11 +506,20 @@ The \code{E} field, when nonzero, is reserved for extenders.
 		\noalign{\hrule}
 		height2pt&\omit&&\omit&&\omit&\cr
 		&0&&Multiply ($(H, L) = A * B)$)&&&\cr
+		height2pt&\omit&&\omit&&\omit&\cr
 		&1&&Divmod ($A + (H, L) / A, B = (H, L) \% B$)&&&\cr
+		height2pt&\omit&&\omit&&\omit&\cr
+		&2&&LoadOff (\code{A = *(B + H:L)})&&*&\cr
+		height2pt&\omit&&\omit&&\omit&\cr
+		&3&&StoreOff (\code{*(B + H:L) = A})&&*&\cr
 		height2pt&\omit&&\omit&&\omit&\cr
 		\noalign{\hrule}
 	}
 }
 \bigskip
+
+Notes:
+\item{*} \code{H:L} is the 8-bit concatenation of the low-order fields,
+interpreted as a signed 8-bit integer, specified in address units.
 
 \maybye
