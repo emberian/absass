@@ -409,7 +409,8 @@ impl RaCx {
                 } else {
                     // If we're here, the desc was defined at least once but never used.
                     // This is a rather degenerate case, but reg_pass still needs a span anyway.
-                    desc.spans.push(Span::new(birth, last_time.unwrap() + 1));
+                    println!("WARN: unused value at program end, temp {} at time {}", desc.reg, birth);
+                    desc.spans.push(Span::new(birth, birth + 1));
                 }
             }
         }
@@ -417,8 +418,12 @@ impl RaCx {
 
     fn reg_pass(&mut self) {
         let mut event_times: Vec<usize> = self.temp_descs.values()
-            .flat_map(|desc| desc.uses.iter().chain(desc.defs.iter()))
-            .cloned()
+            .flat_map(|desc| desc.uses.iter()   // uses
+                      .chain(desc.defs.iter())  // defs
+                      .cloned()  // &usize -> usize
+                      .chain(desc.spans.iter().map(|sp| sp.0))  // births
+                      .chain(desc.spans.iter().map(|sp| sp.1))  // deaths
+            )
             .collect();
         event_times.sort();
         event_times.dedup();
@@ -523,7 +528,11 @@ impl RaCx {
     fn rewrite_place(&self, time: usize, pl: Place, usage: Usage) -> Place {
         if let Place::Temp(t) = pl {
             let desc = &self.temp_descs[&t];
-            let span = desc.span_at(time, usage == Usage::Use).unwrap();
+            let span = desc.span_at(time, usage == Usage::Use);
+            if span.is_none() {
+                println!("span check: no span at time {} while rewriting place {:?} usage {:?}", time, pl, usage);
+            }
+            let span = span.unwrap();
             Place::Reg(span.reg().unwrap())
         } else {
             pl
@@ -565,7 +574,12 @@ impl RaCx {
                             .. src
                         },
                         dst: Xft {
-                            reg: self.rewrite_place(time, dst.reg, Def),
+                            reg: self.rewrite_place(time, dst.reg,
+                                                    if dst.indirect {
+                                                        Use
+                                                    } else {
+                                                        Def
+                                                    }),
                             .. dst
                         },
                     },

@@ -8,11 +8,11 @@ toplevel = _{ SOI ~ program ~ EOI }
 
 program = { statement+ }
 
+terminator = _{ ";" }
 statement = {
-	expr_statement |
-	decl_statement
+	decl_statement |
+	expr_statement
 }
-	terminator = _{ ";" }
 	expr_statement = {
 		expression ~ terminator
 	}
@@ -107,5 +107,5 @@ ident = @{ XID_START ~ XID_CONTINUE* }
 branch = { "if" ~ expression ~ expression ~ ("else" ~ expression)? }
 
 block = {
-	"{" ~ statement* ~ expression ~ "}"
+	"{" ~ statement* ~ expression? ~ "}"
 }

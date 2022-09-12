@@ -8,14 +8,43 @@ pub mod grammar;
 pub mod gen;
 
 use std::io::Read;
-use pest::Parser;
+use pest::{Parser, error::{Error, ErrorVariant, LineColLocation}};
 use grammar::{ProgramParser, Rule, Program};
 use gen::{Cx, Gen, insn::ToAsm, rall::{RAlloc, RaCx}};
 
 fn main() -> std::io::Result<()> {
     let mut source = String::new();
     std::io::stdin().read_to_string(&mut source)?;
-    let parse = ProgramParser::parse(Rule::toplevel, &source).unwrap();
+    let parse = match ProgramParser::parse(Rule::toplevel, &source) {
+        Ok(p) => p,
+        Err(ref err @ Error { ref variant, ref line_col, .. }) => match variant {
+            ErrorVariant::ParsingError { positives, negatives } => {
+                println!("Parse error here:");
+                println!("{}", err.line());
+                for _ in 0 .. match line_col {
+                    LineColLocation::Pos((_, col)) => *col,
+                    LineColLocation::Span((_, col), (_, _)) => *col,
+                } {
+                    print!(" ");
+                }
+                println!("^");
+                println!("Expected whitespace, comment, or any of these:");
+                println!("- {}", positives.iter()
+                         .map(|r| format!("{:?}", r))
+                         .collect::<Vec<_>>()
+                         .join(", ")
+                );
+                println!("While not having one of these:");
+                println!("- {}", negatives.iter()
+                         .map(|r| format!("{:?}", r))
+                         .collect::<Vec<_>>()
+                         .join(", ")
+                );
+                panic!("parsing error");
+            },
+            o => panic!("Unusual error: {:?}", o),
+        },
+    };
     let pgm = Program::from_parse(parse);
     println!("{:?}", pgm);
     let (mut cx, top) = Cx::new(pgm);

@@ -7,7 +7,7 @@ impl Gen for Expr {
         match self {
             Expr::Name(nm) => {
                 let name = cx.gcx.var_ns.name_of(*nm).expect("unexpected unnamed variable");
-                if cx.ecx == ExprCx::Read {
+                if !cx.env.contains_key(nm) && cx.ecx == ExprCx::Read {
                     panic!("use of uninitialized name {}, var {:?}", nm, name);
                 }
                 let mut bk: Option<Block> = None;
@@ -45,7 +45,7 @@ impl Gen for Expr {
             },
             Expr::BinOp(l, o, r) => {
                 let lr = {
-                    if *o == BinOp::Assign {
+                    if let BinOp::Assign = o {
                         let old_ecx = cx.ecx;
                         cx.ecx = ExprCx::Write;
                         let res = l.gen(cx);
@@ -67,13 +67,17 @@ impl Gen for Expr {
                 let temp = cx.temp();
                 let rp = rr.place.expect("invalid rvalue");
                 let lp = lr.place.expect("invalid lvalue");
+                if let BinOp::Assign = o {
+                    return Res {
+                        block: Some(bk.load_into(cx, lp, rp.clone())),
+                        place: Some(rp),
+                    };
+                }
                 bk = bk
                     .load_into(cx, temp.clone(), lp.clone());
                 match o {
-                    BinOp::Assign => {
-                        bk = bk
-                            .load_into(cx, lp, rp);
-                    },
+                    BinOp::Assign => unreachable!(),
+
                     BinOp::LOr | BinOp::Or => {
                         bk = bk
                             .after(Insn::Logic {
@@ -248,22 +252,23 @@ impl Gen for Expr {
             Expr::Branch(cond, ift, iff) => {
                 let condr = cond.gen(cx);
                 let (condb, condp) = (
-                    condr.block.expect("invalid cond block"),
+                    condr.block,
                     condr.place.expect("invalid cond place"),
                 );
                 let iftr = ift.gen(cx);
-                let (iftb, iftp) = (
-                    iftr.block.expect("invalid true block"),
-                    iftr.place.expect("invalid true place"),
+                let (mut iftb, iftp) = (
+                    iftr.block.unwrap_or_else(|| cx.block()),
+                    iftr.place,
                 );
                 let iffr = iff.gen(cx);
-                let (iffb, iffp) = (
-                    iffr.block.expect("invalid false block"),
-                    iffr.place.expect("invalid false place"),
+                let (mut iffb, iffp) = (
+                    iffr.block.unwrap_or_else(|| cx.block()),
+                    iffr.place,
                 );
-                let res = cx.temp();
+                let mut rp: Option<Place> = None;
                 let mut whole = cx.block();
-                let condb = condb
+                let mut test = condb.unwrap_or_else(|| cx.block());
+                test = test
                     .after(Insn::JumpCond {
                         reg: condp,
                         offset: Offset::Expr(format!("{} - $ - 2", iftb.label)),
@@ -273,15 +278,23 @@ impl Gen for Expr {
                                Place::Label(iffb.label.clone())
                     );
                 let end = cx.block();
+                match (iftp, iffp) {
+                    (Some(tp), Some(fp)) => {
+                        let res = cx.temp();
+                        iftb = iftb.load_into(cx, res.clone(), tp);
+                        iffb = iffb.load_into(cx, res.clone(), fp);
+                        rp = Some(res);
+                    },
+                    (None, None) => (),
+                    _ => panic!("cannot unify result/non-result branches"),
+                }
                 whole = whole
-                    .child(condb)
+                    .child(test)
                     .child(iftb
-                           .load_into(cx, res.clone(), iftp)
                            .load_into(cx, Place::Reg(0), Place::Label(end.label.clone())))
-                    .child(iffb
-                           .load_into(cx, res.clone(), iffp))
+                    .child(iffb)
                     .child(end);
-                Res { block: Some(whole), place: Some(res) }
+                Res { block: Some(whole), place: rp }
             },
             Expr::Block(stmts, ex) => {
                 let mut bk = cx.block();

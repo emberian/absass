@@ -213,7 +213,10 @@ impl Expr {
                 let mut it = ex.into_inner();
                 let mut stmts = Vec::new();
                 loop {
-                    let node = it.next().unwrap();
+                    let node = match it.next() {
+                        Some(n) => n,
+                        None => break Expr::Block(Stmts(stmts), Box::new(Expr::Null)),
+                    };
                     let r = node.as_rule();
                     match r {
                         Rule::statement => stmts.push(Stmt::from_st(node, cx)),
