@@ -1,5 +1,6 @@
 use super::*;
 use super::env::Bind;
+use super::rall::PC;
 use crate::grammar::{Expr, Value, BinOp, UnOp, Stmt, Binding};
 
 impl Gen for Expr {
@@ -30,7 +31,7 @@ impl Gen for Expr {
                 let bk = cx.block()
                     .before(Insn::Transfer {
                         src: Xft {
-                            reg: Place::Reg(0),
+                            reg: Place::Reg(PC),
                             indirect: true,
                             mode: AutoMode::PostIncr,
                         },
@@ -202,26 +203,26 @@ impl Gen for Expr {
                     },
                     BinOp::Mul => {
                         bk = bk
-                            .after(Insn::Arith {
-                                src: rp,
-                                dst: temp.clone(),
-                                op: ArithOp::Mul,
+                            .after(Insn::Misc {
+                                b: rp,
+                                a: temp.clone(),
+                                op: MiscOp::Mul,
                             }.into());
                     },
                     BinOp::Div => {
                         bk = bk
-                            .after(Insn::Arith {
-                                src: rp,
-                                dst: temp.clone(),
-                                op: ArithOp::Div,
+                            .after(Insn::Misc {
+                                b: rp,
+                                a: temp.clone(),
+                                op: MiscOp::Div,
                             }.into());
                     },
                     BinOp::Mod => {
                         bk = bk
-                            .after(Insn::Arith {
-                                src: rp,
-                                dst: temp.clone(),
-                                op: ArithOp::Mod,
+                            .after(Insn::Misc {
+                                b: rp,
+                                a: temp.clone(),
+                                op: MiscOp::Mod,
                             }.into());
                     },
                 }
@@ -274,7 +275,7 @@ impl Gen for Expr {
                         offset: Offset::Expr(format!("{} - $ - 2", iftb.label)),
                     }.into())
                     .load_into(cx,
-                               Place::Reg(0),
+                               Place::Reg(PC),
                                Place::Label(iffb.label.clone())
                     );
                 let end = cx.block();
@@ -291,7 +292,7 @@ impl Gen for Expr {
                 whole = whole
                     .child(test)
                     .child(iftb
-                           .load_into(cx, Place::Reg(0), Place::Label(end.label.clone())))
+                           .load_into(cx, Place::Reg(PC), Place::Label(end.label.clone())))
                     .child(iffb)
                     .child(end);
                 Res { block: Some(whole), place: rp }
@@ -309,6 +310,15 @@ impl Gen for Expr {
                     bk = bk.child(b);
                 }
                 Res { block: Some(bk), place: exr.place }
+            },
+            Expr::Call(cbl, args) => {
+                let cblr = cbl.gen(cx);
+                let mut cacocx = { cx.caco.clone() }.begin(cx);
+                for arg in args {
+                    let argr = arg.gen(cx);
+                    cacocx.arg(argr, cx);
+                }
+                cacocx.end(cblr, cx)
             },
             Expr::Null => {
                 Res { block: None, place: None }

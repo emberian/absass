@@ -51,9 +51,9 @@ pub enum ArithOp {
     Shl,
     Shr,
     Asr,
-    Mul,
-    Div,
-    Mod,
+    Rol,
+    Ror,
+    Neg,
 }
 
 impl ToAsm for ArithOp {
@@ -65,9 +65,9 @@ impl ToAsm for ArithOp {
             Shl => "SHL",
             Shr => "SHR",
             Asr => "ASR",
-            Mul => "MUL",
-            Div => "DIV",
-            Mod => "MOD",
+            Rol => "ROL",
+            Ror => "ROR",
+            Neg => "NEG",
         }.into()
     }
 }
@@ -105,6 +105,7 @@ pub enum Place {
     Reg(Reg),
     Temp(Temp),
     Label(String),
+    Stack,
 }
 
 impl ToAsm for Place {
@@ -114,6 +115,7 @@ impl ToAsm for Place {
             // Not valid, but useful for debugging
             Place::Temp(t) => format!("%{}", t),
             Place::Label(s) => s.clone(),
+            Place::Stack => "%STACK".into(),
         }
     }
 }
@@ -149,6 +151,35 @@ impl ToAsm for Offset {
     }
 }
 
+#[EnumRepr(type = "u8", implicit = true)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum MiscOp {
+    Swap,
+    Mul,
+    Div,
+    Mod,
+    IndLoad,
+    IndStore,
+    LoopInd,
+    Loop,
+}
+
+impl ToAsm for MiscOp {
+    fn to_asm(&self) -> String {
+        use MiscOp::*;
+        match self {
+            Swap => "SWAP",
+            Mul => "MUL",
+            Div => "DIV",
+            Mod => "MOD",
+            IndLoad => "LDR",
+            IndStore => "STR",
+            LoopInd => "LOOPI",
+            Loop => "LOOP",
+        }.into()
+    }
+}
+
 #[derive(Debug, Clone, Hash)]
 pub enum Insn {
     Logic { src: Place, dst: Place, op: LogicOp },
@@ -161,7 +192,7 @@ pub enum Insn {
     Transfer { src: Xft, dst: Xft },
     SysReg { reg: Place, sr: SysReg, write: bool },
     JumpCond { reg: Place, offset: Offset },
-    JumpLink { prog: Place, link: Place },
+    Misc { op: MiscOp, a: Place, b: Place },
     SubWord { dst: Place, byte_ix: u8, bytes: u8 },
     Unknown(u16),
 }
@@ -200,8 +231,8 @@ impl ToAsm for Insn {
             ),
             Transfer { src, dst } => format!("XF {}, {}", dst.to_asm(), src.to_asm()),
             SysReg { reg, sr, write } => format!("SR {}, {}, {}", if *write { "W" } else { "R" }, reg.to_asm(), sr),
-            JumpCond { reg, offset } => format!("JC {}, {}", reg.to_asm(), offset.to_asm()),
-            JumpLink { prog, link } => format!("JAL {}, {}", link.to_asm(), prog.to_asm()),
+            JumpCond { reg, offset } => format!("JNZ {}, {}", reg.to_asm(), offset.to_asm()),
+            Misc { op, a, b } => format!("{} {}, {}", op.to_asm(), a.to_asm(), b.to_asm()),
             SubWord { dst, byte_ix, bytes } => format!("SWO {}, {}, {}", dst.to_asm(), byte_ix, bytes),
             Unknown(i) => format!(".BYTE {}, {}", (i >> 8) & 0xff, i & 0xff),
         }

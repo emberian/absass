@@ -1,21 +1,21 @@
 use super::*;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 // Well-known registers
-const PC: Reg = 0;
-const SP: Reg = 1;
-const FP: Reg = 2;
-const RA: Reg = 3;
-const A0: Reg = 4;
-const A_NUM: Reg = 6;
-const T0: Reg = 10;
-const T_NUM: Reg = 6;
+pub const PC: Reg = 0;
+pub const SP: Reg = 1;
+pub const FP: Reg = 2;
+pub const RA: Reg = 3;
+pub const A0: Reg = 4;
+pub const A_NUM: Reg = 6;
+pub const T0: Reg = 10;
+pub const T_NUM: Reg = 6;
 
 #[allow(dead_code)]
-const fn is_arg(reg: Reg) -> bool { reg >= A0 && (reg - A0) < A_NUM }
+pub const fn is_arg(reg: Reg) -> bool { reg >= A0 && (reg - A0) < A_NUM }
 #[allow(dead_code)]
-const fn is_temp(reg: Reg) -> bool { reg >= T0 && (reg - T0) < T_NUM }
+pub const fn is_temp(reg: Reg) -> bool { reg >= T0 && (reg - T0) < T_NUM }
 
 #[derive(Debug, Clone, Copy, Hash)]
 pub struct Span(pub usize, pub usize, pub Option<Reg>);
@@ -27,6 +27,21 @@ impl Span {
 
     pub fn reg(&self) -> &Option<Reg> { &self.2 }
     pub fn reg_mut(&mut self) -> &mut Option<Reg> { &mut self.2 }
+
+    pub fn overlaps(&self, other: &Span) -> Option<Span> {
+        let (ls, ee) = (self.0.max(other.0), self.1.min(other.1));
+        if ls <= ee {
+            Some(Span(ls, ee, None))
+        } else {
+            None
+        }
+    }
+
+    pub fn contains(&self, t: usize, endpoint: bool) -> bool {
+        t >= self.0 && (
+            t < self.1 || (endpoint && t == self.1)
+        )
+    }
 }
 
 #[derive(Debug, Clone, Hash)]
@@ -124,6 +139,15 @@ impl RegDesc {
             if t < spn.0 { return false; }
         }
         false
+    }
+
+    pub fn overlaps_any(&self, span: &Span) -> Option<Span> {
+        for spn in &self.spans {
+            if let Some(_overlap) = spn.overlaps(span) {
+                return Some(*spn);
+            }
+        }
+        None
     }
 }
 
@@ -246,11 +270,52 @@ impl Default for RAlloc {
 }
 
 #[derive(Debug, Clone)]
+pub struct StackDesc {
+    pub spans: Vec<(Span, HashSet<Reg>)>,
+}
+
+impl StackDesc {
+    pub fn new() -> Self {
+        Self {
+            spans: Vec::new(),
+        }
+    }
+
+    pub fn add_span(&mut self, spn: Span) {
+        self.spans.push((spn, HashSet::new()));
+    }
+
+    pub fn in_span(&self, time: usize) -> Option<usize> {
+        for (idx, (spn, _)) in self.spans.iter().enumerate() {
+            if spn.contains(time, false) {
+                return Some(idx);
+            }
+        }
+        None
+    }
+
+    pub fn add_reg(&mut self, spidx: usize, reg: Reg) {
+        self.spans[spidx].1.insert(reg);
+    }
+
+    pub fn iter<'s>(&'s self) -> impl Iterator<Item=(Span, Vec<Reg>)> + 's {
+        self.spans.iter()
+            .map(|(sp, hs)| {
+                let mut ordered = hs.iter().cloned().collect::<Vec<_>>();
+                ordered.sort();
+                (*sp, ordered)
+            })
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct RaCx {
     pub ra: RAlloc,
     pub time: Vec<(usize, Line)>,
     pub insertions: HashMap<usize, Vec<Line>>,
     pub temp_descs: HashMap<Temp, RegDesc>,
+    pub reg_descs: HashMap<Reg, RegDesc>,
+    pub stack: StackDesc,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -265,6 +330,8 @@ impl RaCx {
             time: lines.iter().cloned().enumerate().collect(),
             insertions: HashMap::new(),
             temp_descs: HashMap::new(),
+            reg_descs: HashMap::new(),
+            stack: StackDesc::new(),
         }
     }
 
@@ -284,8 +351,8 @@ impl RaCx {
     fn analyze_line(&mut self, time: usize, line: &Line) {
         use Usage::*;
 
-        if let Line::Insn(insn) = line {
-            match insn {
+        match line {
+            Line::Insn(insn) => match insn {
                 Insn::Logic { src, dst, op } => {
                     self.analyze_place(time, dst, Def);
                     if op.reads_dst() {
@@ -332,16 +399,27 @@ impl RaCx {
                 Insn::JumpCond { reg, .. } => {
                     self.analyze_place(time, reg, Use);
                 },
-                Insn::JumpLink { prog, link } => {
-                    self.analyze_place(time, prog, Use);
-                    self.analyze_place(time, link, Def);
+                Insn::Misc { a, b, .. } => {
+                    self.analyze_place(time, a, Def);
+                    self.analyze_place(time, a, Use);
+                    self.analyze_place(time, b, Use);
                 },
                 Insn::SubWord { dst, .. } => {
                     self.analyze_place(time, dst, Use);
                     self.analyze_place(time, dst, Def);
                 },
                 Insn::Unknown(_) => (),  // all bets are off
-            }
+            },
+            Line::Life(life, reg) => {
+                let desc = self.reg_descs.entry(*reg).or_insert_with(
+                    || self.ra.descs.get(&reg).unwrap().clone()
+                );
+                (match life {
+                    Life::Claim => &mut desc.defs,
+                    Life::Release => &mut desc.uses,
+                }).push(time);
+            },
+            _ => (),
         }
     }
 
@@ -356,10 +434,54 @@ impl RaCx {
         }
     }
 
+    fn stack_pass(&mut self) {
+        let mut depth = 0;
+        let mut start = None;
+        let mut last_time = None;
+
+        let timeline = self.time.clone();
+        for (time, line) in timeline {
+            last_time = Some(time);
+            if let Line::Stack(dir) = line {
+                match dir {
+                    Dir::Entry => {
+                        if depth == 0 {
+                            start = Some(time);
+                        }
+                        depth += 1;
+                    },
+                    Dir::Exit => {
+                        if depth == 0 {
+                            panic!("stack save discipline violation at time {}", time);
+                        }
+                        depth -= 1;
+                        if depth == 0 {
+                            self.stack.add_span(Span::new(start.unwrap(), time));
+                            start = None;
+                        }
+                    },
+                }
+            }
+        }
+        
+        if depth > 0 {
+            println!("WARN: save stack nonzero ({}) at exit, closing span", depth);
+            self.stack.add_span(Span::new(start.unwrap(), last_time.unwrap() + 1));
+        }
+    }
+
     fn span_pass(&mut self) {
         use Usage::*;
 
-        for desc in self.temp_descs.values_mut() {
+        for (temp, desc) in
+            self.temp_descs.values_mut()
+            .map(|v| (true, v))
+            .chain(
+                self.reg_descs.values_mut()
+                .map(|v| (false, v))
+            )
+        {
+            let kind = if temp { "temp" } else { "reg" };
             let mut times: Vec<_> = desc.uses.iter().map(|&t| (Use, t)).collect();
             times.extend(desc.defs.iter().map(|&t| (Def, t)));
             // A stable sort preserves Use/Def ordering on the same t
@@ -374,7 +496,7 @@ impl RaCx {
                 match ev {
                     Use => {
                         if last_def.is_none() {
-                            println!("WARN: use before def, temp {} at time {}", desc.reg, time);
+                            println!("WARN: use before def, {} {} at time {}", kind, desc.reg, time);
                         }
                         last_use = Some(time);
                     },
@@ -384,7 +506,7 @@ impl RaCx {
                             if let Some(death) = last_use {
                                 desc.spans.push(Span::new(birth, death));
                             } else {
-                                println!("WARN: unused value, temp {} at time {}", desc.reg, time);
+                                println!("WARN: unused value, {} {} at time {}", kind, desc.reg, time);
                                 // This span is still needed by reg_pass anyway
                                 desc.spans.push(Span::new(birth, time));
                             }
@@ -400,7 +522,7 @@ impl RaCx {
                     if birth < death {
                         desc.spans.push(Span::new(birth, death));
                     } else {
-                        println!("WARN: unused value at program end, temp {} at time {}", desc.reg, birth);
+                        println!("WARN: unused value at program end, {} {} at time {}", kind, desc.reg, birth);
                         // Push a span anyway, since reg_pass needs it--just say it goes beyond the
                         // end time.
                         let end = last_time.unwrap() + 1;
@@ -409,7 +531,7 @@ impl RaCx {
                 } else {
                     // If we're here, the desc was defined at least once but never used.
                     // This is a rather degenerate case, but reg_pass still needs a span anyway.
-                    println!("WARN: unused value at program end, temp {} at time {}", desc.reg, birth);
+                    println!("WARN: unused value at program end, {} {} at time {}", kind, desc.reg, birth);
                     desc.spans.push(Span::new(birth, birth + 1));
                 }
             }
@@ -471,7 +593,7 @@ impl RaCx {
                             if !top.ready { break; }
                             let top = save_fence.pop().unwrap();
                             println!("\tpop reg {}", top.reg);
-                            self.insert(time).push(Line::Insn(Insn::Transfer {
+                            self.insert(time + 1).push(Line::Insn(Insn::Transfer {
                                 src: Xft {
                                     reg: Place::Reg(stack),
                                     indirect: true,
@@ -488,27 +610,51 @@ impl RaCx {
                 }
                 if temp_desc.defined_at(time) {
                     println!("time {}: temp {} is born", time, temp_desc.reg);
-                    let bind = match self.ra.take() {
-                        Taken::Free(reg) => Bind { reg, saved: false },
-                        Taken::Save(reg) | Taken::Spill(reg) => {
-                            self.insert(time).push(Line::Insn(Insn::Transfer {
-                                src: Xft {
-                                    reg: Place::Reg(reg),
-                                    indirect: false,
-                                    mode: AutoMode::None,
-                                },
-                                dst: Xft {
-                                    reg: Place::Reg(stack),
-                                    indirect: true,
-                                    mode: AutoMode::PreDecr,
-                                },
-                            }));
-                            save_fence.push(Fence { reg, ready: false });
-                            println!("\tsaved/spilled, stack is now {:?}", save_fence);
-                            Bind { reg, saved: true }
-                        },
-                        Taken::Nothing => panic!("Failed to allocate a register"),
+                    let span = temp_desc.span_at(time, false).unwrap();
+                    let mut unusable = Vec::new();
+                    let bind = loop {
+                        let conflicts = |reg: Reg| {
+                            if let Some(desc) = self.reg_descs.get(&reg) {
+                                desc.overlaps_any(span).is_some()
+                            } else {
+                                false
+                            }
+                        };
+                        break match self.ra.take() {
+                            Taken::Free(reg) => {
+                                if conflicts(reg) { unusable.push(reg); continue; }
+                                Bind { reg, saved: false }
+                            },
+                            Taken::Save(reg) | Taken::Spill(reg) => {
+                                if conflicts(reg) { unusable.push(reg); continue; }
+                                if let Some(ix) = self.stack.in_span(time) {
+                                    self.stack.add_reg(ix, reg);
+                                    println!("spilled reg {} saved to span {} ({:?})", reg, ix, self.stack.spans[ix].0);
+                                    Bind { reg, saved: false }
+                                } else {
+                                    self.insert(time).push(Line::Insn(Insn::Transfer {
+                                        src: Xft {
+                                            reg: Place::Reg(reg),
+                                            indirect: false,
+                                            mode: AutoMode::None,
+                                        },
+                                        dst: Xft {
+                                            reg: Place::Reg(stack),
+                                            indirect: true,
+                                            mode: AutoMode::PreDecr,
+                                        },
+                                    }));
+                                    save_fence.push(Fence { reg, ready: false });
+                                    println!("\tsaved/spilled, stack is now {:?}", save_fence);
+                                    Bind { reg, saved: true }
+                                }
+                            },
+                            Taken::Nothing => panic!("Failed to allocate a register"),
+                        };
                     };
+                    for un in unusable {
+                        self.ra.give(un);
+                    }
                     bindings.insert(temp_desc.reg as Temp, bind);
                     println!("time {}: temp {} inserted as reg {} into bindings {:?}", time, temp_desc.reg, bind.reg, bindings);
                     *temp_desc.span_mut_starting_at(time).unwrap().reg_mut() = Some(bind.reg);
@@ -519,10 +665,48 @@ impl RaCx {
         self.temp_descs = descs;
     }
 
+    fn respill_pass(&mut self) {
+        let stack = self.ra.stack;
+
+        let spills = self.stack.iter().collect::<Vec<_>>();
+        for (sp, regs) in spills {
+            for reg in regs.iter().copied().rev() {
+                self.insert(sp.0).push(Insn::Transfer {
+                    src: Xft {
+                        reg: Place::Reg(reg),
+                        indirect: false,
+                        mode: AutoMode::None,
+                    },
+                    dst: Xft {
+                        reg: Place::Reg(stack),
+                        indirect: true,
+                        mode: AutoMode::PreDecr,
+                    },
+                }.into());
+            }
+            for reg in regs.iter().copied() {
+                self.insert(sp.1).push(Insn::Transfer {
+                    src: Xft {
+                        reg: Place::Reg(stack),
+                        indirect: true,
+                        mode: AutoMode::PostIncr,
+                    },
+                    dst: Xft {
+                        reg: Place::Reg(reg),
+                        indirect: false,
+                        mode: AutoMode::None,
+                    },
+                }.into());
+            }
+        }
+    }
+
     pub fn allocate(&mut self) {
         self.def_use_pass();
         self.span_pass();
+        self.stack_pass();
         self.reg_pass();
+        self.respill_pass();
     }
 
     fn rewrite_place(&self, time: usize, pl: Place, usage: Usage) -> Place {
@@ -593,10 +777,11 @@ impl RaCx {
                         reg: self.rewrite_place(time, reg, Use),
                         offset,
                     },
-                Insn::JumpLink { prog, link } =>
-                    Insn::JumpLink {
-                        prog: self.rewrite_place(time, prog, Use),
-                        link: self.rewrite_place(time, link, Def),
+                Insn::Misc { op, a, b } =>
+                    Insn::Misc {
+                        a: self.rewrite_place(time, a, Def),
+                        b: self.rewrite_place(time, b, Use),
+                        op,
                     },
                 Insn::SubWord { dst, byte_ix, bytes } =>
                     Insn::SubWord {

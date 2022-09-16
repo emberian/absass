@@ -67,10 +67,29 @@ fn main() -> std::io::Result<()> {
             }
         }
     }
-    let mut descs = rc.temp_descs.values().cloned().collect::<Vec<_>>();
-    descs.sort_by_key(|desc| desc.reg);
+    let mut tdescs = rc.temp_descs.values().cloned().collect::<Vec<_>>();
+    tdescs.sort_by_key(|desc| desc.reg);
+    let mut rdescs = rc.reg_descs.values().cloned().collect::<Vec<_>>();
+    rdescs.sort_by_key(|desc| desc.reg);
+    print!("{} . ", std::iter::repeat(' ').take(tdescs.len()).collect::<String>());
+    for rd in &rdescs {
+        print!("{}", rd.reg);
+    }
+    println!();
     for (time, line) in lines.iter().enumerate() {
-        for d in &descs {
+        for d in &tdescs {
+            print!("{}", if d.defined_at(time) {
+                'V'
+            } else if d.used_at(time) {
+                '-'
+            } else if d.live_at(time) {
+                '|'
+            } else {
+                ' '
+            });
+        }
+        print!(" . ");
+        for d in &rdescs {
             print!("{}", if d.defined_at(time) {
                 'V'
             } else if d.used_at(time) {

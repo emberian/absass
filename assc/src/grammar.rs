@@ -110,6 +110,7 @@ pub enum Expr {
     UnOp(UnOp, Box<Expr>),
     Branch(Box<Expr>, Box<Expr>, Box<Expr>),
     Block(Stmts, Box<Expr>),
+    Call(Box<Expr>, Vec<Expr>),
     Null,
 }
 
@@ -224,6 +225,20 @@ impl Expr {
 
                         _ => panic!("unexpected node in block: {:?}", r),
                     }
+                }
+            },
+
+            Rule::call => {
+                let mut it = ex.into_inner();
+                let prim = Self::from_ex(it.next().unwrap(), cx);
+                if let Some(node) = it.next() {
+                    let mut parit = node.into_inner();
+                    let args: Vec<_> = parit
+                        .map(|node| Self::from_ex(node, cx))
+                        .collect();
+                    Expr::Call(Box::new(prim), args)
+                } else {
+                    prim
                 }
             },
 

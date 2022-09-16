@@ -81,13 +81,18 @@ arith_factor = {
 	op_mod = { "%" }
 
 unary = {
-	unary_op* ~ atom
+	unary_op* ~ call
 }
 	unary_op = _{ op_ident | op_neg | op_not | op_cmp }
 		op_ident = { "+" }
 		op_neg = { "-" }
 		op_not = { "!" }
 		op_cmp = { "~" }
+
+call = { atom ~ params? }
+	params = {
+		"(" ~ (expression ~ ",")* ~ expression ~ ","? ~ ")"
+	}
 
 atom = _{ literal | branch | ident | block | "(" ~ expression ~ ")" }
 
