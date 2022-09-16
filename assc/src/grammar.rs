@@ -111,6 +111,7 @@ pub enum Expr {
     Branch(Box<Expr>, Box<Expr>, Box<Expr>),
     Block(Stmts, Box<Expr>),
     Call(Box<Expr>, Vec<Expr>),
+    Func(Vec<Name>, Box<Expr>),
     Null,
 }
 
@@ -239,6 +240,20 @@ impl Expr {
                     Expr::Call(Box::new(prim), args)
                 } else {
                     prim
+                }
+            },
+
+            Rule::funcdecl => {
+                let mut it = ex.into_inner();
+                let mut args: Vec<Name> = Vec::new();
+                'outer: loop {
+                    while let Some(node) = it.next() {
+                        if let Rule::ident = node.as_rule() {
+                            args.push(cx.var_ns.index_of(node.as_str()));
+                        } else {
+                            break 'outer Expr::Func(args, Box::new(Self::from_ex(node, cx)));
+                        }
+                    }
                 }
             },
 

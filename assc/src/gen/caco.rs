@@ -36,6 +36,7 @@ impl CallConv {
         }
     }
 
+    pub fn regs(&self) -> &Vec<Reg> { &self.regs }
 }
 
 impl Default for CallConv {

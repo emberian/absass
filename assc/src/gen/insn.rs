@@ -105,6 +105,7 @@ pub enum Place {
     Reg(Reg),
     Temp(Temp),
     Label(String),
+    LabelValue(String),
     Stack,
 }
 
@@ -114,7 +115,7 @@ impl ToAsm for Place {
             Place::Reg(r) => format!("R{}", r),
             // Not valid, but useful for debugging
             Place::Temp(t) => format!("%{}", t),
-            Place::Label(s) => s.clone(),
+            Place::Label(s) | Place::LabelValue(s) => s.clone(),
             Place::Stack => "%STACK".into(),
         }
     }

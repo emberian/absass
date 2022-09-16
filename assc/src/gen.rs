@@ -6,6 +6,8 @@ pub mod ty;
 pub mod rall;
 pub mod caco;
 
+use std::collections::HashMap;
+
 use insn::*;
 
 use crate::{grammar::{self, Program, Stmts}, gen::rall::SP};
@@ -17,6 +19,19 @@ pub enum ExprCx {
     Write,
 }
 
+#[derive(Debug, Clone)]
+pub struct Layout {
+    pub locals: HashMap<grammar::Name, Place>,
+}
+
+impl Layout {
+    pub fn new() -> Self {
+        Self {
+            locals: HashMap::new(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Cx {
     next_temp: Temp,
@@ -25,11 +40,12 @@ pub struct Cx {
     pub env: Env,
     pub ecx: ExprCx,
     pub caco: caco::CallConv,
+    pub layout: Vec<Layout>,
 }
 
 #[derive(Debug, Clone)]
 pub struct Block {
-    label: String,
+    pub label: String,
     prelude: Vec<Line>,
     children: Vec<Block>,
     postlude: Vec<Line>,
@@ -145,14 +161,14 @@ impl Block {
             match pl {
                 Reg(r) => (Xft { reg: Reg(r), indirect: false, mode: AutoMode::None }, bk),
                 Temp(t) => (Xft { reg: Temp(t), indirect: false, mode: AutoMode::None }, bk),
-                Label(l) => {
+                ref p @ Label(ref l) | ref p @ LabelValue(ref l) => {
                     let temp = cx.temp();
                     bk = bk.after(Insn::Transfer {
                         src: Xft { reg: Reg(rall::PC), indirect: true, mode: AutoMode::PostIncr },
                         dst: Xft { reg: temp.clone(), indirect: false, mode: AutoMode::None },
                     }.into())
                         .after(Line::WordExpr(l.clone()));
-                    (Xft { reg: temp, indirect: true, mode: AutoMode::None }, bk)
+                    (Xft { reg: temp, indirect: matches!(p, Place::Label(_)), mode: AutoMode::None }, bk)
                 },
                 Stack => if dst {
                     (Xft { reg: Place::Reg(SP), indirect: true, mode: AutoMode::PreDecr }, bk)
@@ -198,6 +214,7 @@ impl Cx {
             env: Env::new(),
             ecx: ExprCx::Read,
             caco: caco::CallConv::default(),
+            layout: Vec::new(),
         }, pgm.stmts)
     }
 

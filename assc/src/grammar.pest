@@ -94,7 +94,7 @@ call = { atom ~ params? }
 		"(" ~ (expression ~ ",")* ~ expression ~ ","? ~ ")"
 	}
 
-atom = _{ literal | branch | ident | block | "(" ~ expression ~ ")" }
+atom = _{ literal | branch | funcdecl | ident | block | "(" ~ expression ~ ")" }
 
 literal = { lit_float | lit_int }
 	lit_int = { lit_hex | lit_oct | lit_bin | lit_dec }
@@ -113,4 +113,8 @@ branch = { "if" ~ expression ~ expression ~ ("else" ~ expression)? }
 
 block = {
 	"{" ~ statement* ~ expression? ~ "}"
+}
+
+funcdecl = {
+	"fn" ~ "(" ~ (ident~ ",")* ~ ident? ~ ")" ~ "=" ~ expression
 }

@@ -1,6 +1,6 @@
 use super::*;
 use super::env::Bind;
-use super::rall::PC;
+use super::rall::{PC, RA, FP, A0};
 use crate::grammar::{Expr, Value, BinOp, UnOp, Stmt, Binding};
 
 impl Gen for Expr {
@@ -8,18 +8,22 @@ impl Gen for Expr {
         match self {
             Expr::Name(nm) => {
                 let name = cx.gcx.var_ns.name_of(*nm).expect("unexpected unnamed variable");
-                if !cx.env.contains_key(nm) && cx.ecx == ExprCx::Read {
+                let res = cx.env.resolve(*nm);
+                if let Some(bind) = res {
+                    return Res { block: None, place: Some(bind.place.clone()) };
+                }
+                if cx.ecx == ExprCx::Read {
                     panic!("use of uninitialized name {}, var {:?}", nm, name);
                 }
-                let mut bk: Option<Block> = None;
-                let pl = cx.env.entry(*nm).or_insert_with(|| {
-                    bk = Some(
-                        Block::new(name.into())
-                        .before(Line::Word(0))
-                    );
-                    Bind { name: *nm, ty: (), place: Place::Label(name.into()) }
-                }).place.clone();
-                Res { block: bk, place: Some(pl) }
+                let bk = Block::new(name.into())
+                    .before(Line::Word(0));
+                let pl = Place::Label(name.into());
+                cx.env.insert(Bind {
+                    name: *nm,
+                    ty: (),
+                    place: pl.clone(),
+                });
+                Res { block: Some(bk), place: Some(pl) }
             },
             Expr::Literal(v) => {
                 let uval = match v {
@@ -276,7 +280,7 @@ impl Gen for Expr {
                     }.into())
                     .load_into(cx,
                                Place::Reg(PC),
-                               Place::Label(iffb.label.clone())
+                               Place::LabelValue(iffb.label.clone())
                     );
                 let end = cx.block();
                 match (iftp, iffp) {
@@ -320,6 +324,62 @@ impl Gen for Expr {
                 }
                 cacocx.end(cblr, cx)
             },
+
+            Expr::Func(args, body) => {
+                let end = cx.block();
+                let mut outer = cx.block()
+                    .child(cx.block().load_into(cx, Place::Reg(PC), Place::LabelValue(end.label.clone())));
+                let mut bk = cx.block();
+                let prol = cx.block()
+                    .load_into(cx, Place::Stack, Place::Reg(RA))
+                    .load_into(cx, Place::Stack, Place::Reg(FP))
+                    .load_into(cx, Place::Reg(FP), Place::Reg(SP))
+                    .after(Line::Stack(Dir::Entry));
+                bk = bk.child(prol);
+
+                let mut env = Env::derive(std::mem::replace(&mut cx.env, Env::new()));
+                let regs = cx.caco.regs().clone();
+                if args.len() > regs.len() {
+                    todo!();
+                }
+                let mut saved = Vec::new();
+                for (nm, reg) in args.iter().zip(regs.iter().copied().rev()) {
+                    bk = bk.before(Line::Life(Life::Claim, reg));
+                    saved.push(reg);
+                    env.insert(Bind {
+                        name: *nm,
+                        ty: (),
+                        place: Place::Reg(reg),
+                    });
+                }
+                cx.env = env;
+                let exr = body.gen(cx);
+                cx.env = std::mem::replace(&mut cx.env, Env::new()).pop().unwrap();
+
+                if let Some(b) = exr.block {
+                    bk = bk.child(b);
+                }
+                bk = bk
+                    .load_into(cx, Place::Reg(A0), exr.place.expect("invalid expression in function"))
+                    .after(Line::Stack(Dir::Exit));
+                for reg in saved {
+                    bk = bk.after(Line::Life(Life::Release, reg));
+                }
+                bk = bk
+                    .load_into(cx, Place::Reg(FP), Place::Stack)
+                    .load_into(cx, Place::Reg(RA), Place::Stack)
+                    .after(Insn::Misc {
+                        op: MiscOp::Swap,
+                        a: Place::Reg(RA),
+                        b: Place::Reg(PC),
+                    }.into());
+                let lbl = bk.label.clone();
+                outer = outer
+                    .child(bk)
+                    .child(end);
+                Res { block: Some(outer), place: Some(Place::LabelValue(lbl)) }
+            },
+            
             Expr::Null => {
                 Res { block: None, place: None }
             },
