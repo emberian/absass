@@ -171,7 +171,7 @@ class Assembler
 
 	e_misc: (data) =>
 	    {:a, :b, :op} = data
-		@emit_byte (@@OPCODE.MISC | op << 8 | a << 4 | b)
+		@emit (@@OPCODE.MISC | op << 8 | b << 4 | a)
 
 	e_sbr: (data) =>
 		{:v,:c,:s,:op} = data
@@ -579,8 +579,8 @@ class Assembler
 				insn: "misc"
 				data:
 					:op
-					src: src.val
-					dst: dst.val
+					b: src.val
+					a: dst.val
 			}, s
 
 	for name, op in pairs @SBR
